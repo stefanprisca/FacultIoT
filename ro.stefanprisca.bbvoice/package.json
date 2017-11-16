@@ -1,0 +1,16 @@
+{
+  "name": "bbvoice",
+  "version": "0.0.1",
+  "description": "Web-rtc part of voice chat",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/stefanprisca/browserVoice.git"
+  },
+  "dependencies": {
+    "express": "^4.16.2",
+    "express-static": "^1.2.5",
+    "node-static": "0.7.10",
+    "socket.io": "1.2.0"
+  },
+  "license": "UNLICENSED"
+}

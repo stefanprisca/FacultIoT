@@ -1,0 +1,18 @@
+--- 11/09/2017 ----
+-> The proposed output streaming tree would be better over a full mesh-up since it reduces the upload bandwidth of all trees.
+-> I am not sure if I could improve the input size by creating just one streaming tree?
+	-> one thought would be to have a single bidirectional streaming tree, but this is just a big mesh
+
+#####	
+-> a different thought would be to have a round-robin system; where browsers maintain only 2 data streams: in/out
+		** This would reduce the input to 1, and output to 1
+		-> this could work with multiple tracks in the same MediaStream
+		-> May have bi-directional streams (maintain 2 in/ 2 out) !! synchronization issues !!
+		++ scales a lot better than other methods 
+		-- more stream processing: need to append your own data to the input stream and handle multiple stream tracks
+		-- more delay: n hops to recieve data (vs log(n) in case of the streaming tree)
+#####
+
+** Note: main difference between chat and other streaming apps is the chat has multiple stream sources.
+
+librivox

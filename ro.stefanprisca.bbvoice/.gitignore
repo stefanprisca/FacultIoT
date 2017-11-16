@@ -1,0 +1,7 @@
+/node_modules
+.vscode/tags
+/.vscode
+**/__pycache__/*
+**/.bin/*
+**/node_modules/*
+/kademlia/venv
