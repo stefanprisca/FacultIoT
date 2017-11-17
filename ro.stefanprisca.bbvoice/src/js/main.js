@@ -76,23 +76,24 @@ function loadLocalStream(recording) {
 }
 
 socket.onmessage = function (message){
-  var data = message.data.replace('"', '').replace('"', '').replace('\n', '')
+  var data = message.data.replace('\n', '')
   console.log(`got a new message from the server: ${data}`)
   switch (data) {
-    case 'created':
+    case '"created"':
       isInitiator = true;
       loadLocalStream(recording)    
       break;
-    case 'join':
+    case '"join"':
       isChannelReady = true;
-      loadLocalStream(recording)    
+      loadLocalStream(recording)
+      maybeStart() 
       break;
       
-    case 'full':
+    case '"full"':
       console.log('Room ' + room + ' is full');
       break;
 
-    case 'joined':
+    case '"joined"':
       isChannelReady = true;
       maybeStart()    
       break;
@@ -130,14 +131,16 @@ socket.onmessage = function (message){
 ////////////////////////////////////////////////
 
 // This client receives a message
-function handleWebRTC(message) {
-  console.log('Client received message:', message);
-  if (message === 'got user media') {
-    maybeStart();
-  } else if (message.type === 'offer') {
+function handleWebRTC(data) {
+  console.log('Client received message:', data);
+  var message = JSON.parse(data)
+  console.log(`The message type is ${message.type}`)
+
+  if (message.type === 'offer') {
     if (!isInitiator && !isStarted) {
       maybeStart();
     }
+    console.log("--------- Got a new offer for joining the RTC connection!")
     pc.setRemoteDescription(new RTCSessionDescription(message));
     doAnswer();
   } else if (message.type === 'answer' && isStarted) {
