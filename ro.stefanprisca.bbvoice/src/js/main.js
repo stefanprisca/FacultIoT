@@ -3,10 +3,13 @@
 var isChannelReady = false;
 var isInitiator = false;
 var isStarted = false;
+var streamLoaded = false
 var localStream;
 var pc;
 var remoteStream;
 var turnReady;
+
+const socketId = prompt("Enter user id:")
 
 var pcConfig = {
   'iceServers': [{
@@ -26,46 +29,108 @@ var room = 'foo';
 // Could prompt for room name:
 // room = prompt('Enter room name:');
 
-var socket = io.connect();
-
-if (room !== '') {
-  socket.emit('create or join', room);
-  console.log('Attempted to create or  join room', room);
-}
-
-socket.on('created', function(room) {
-  console.log('Created room ' + room);
-  isInitiator = true;
-});
-
-socket.on('full', function(room) {
-  console.log('Room ' + room + ' is full');
-});
-
-socket.on('join', function (room){
-  console.log('Another peer made a request to join room ' + room);
-  console.log('This peer is the initiator of room ' + room + '!');
-  isChannelReady = true;
-});
-
-socket.on('joined', function(room) {
-  console.log('joined: ' + room);
-  isChannelReady = true;
-});
-
-socket.on('log', function(array) {
-  console.log.apply(console, array);
-});
-
-////////////////////////////////////////////////
+var socket = new WebSocket('ws://127.0.0.1:8124/websocket?id='+socketId)
 
 function sendMessage(message) {
   console.log('Client sending message: ', message);
-  socket.emit('message', message);
+  socket.send(JSON.stringify({ id:socketId, message: message }))
 }
 
+var recording = "1.m4a"//prompt("Input recording name:")
+
+socket.onopen = function () {
+  if (room !== '') {
+    sendMessage('create or join');
+    console.log('Attempted to create or  join room', room);
+  }
+}
+
+var localVideo = document.getElementById('localVideo');
+var remoteVideo = document.querySelector('#remoteVideo');
+
+// navigator.mediaDevices.getUserMedia({
+//   audio: false,
+//   video: false
+// })
+// .then(gotStream)
+// .catch(function(e) {;
+//   alert('getUserMedia() error: ' + e.name);
+// });
+
+
+function loadLocalStream(recording) {
+  if(streamLoaded){
+    console.log("Stream already")
+    return
+  }
+  console.log(`Adding local stream from file ${recording}.`);
+  var localVideo = document.getElementById('localVideo');
+  localVideo.src = `./resources/${recording}`
+  localVideo.play()
+  localStream = localVideo.captureStream();
+  sendMessage('got user media');
+  if (isInitiator) {
+    maybeStart();
+  }
+  streamLoaded = true
+}
+
+socket.onmessage = function (message){
+  var data = message.data.replace('"', '').replace('"', '').replace('\n', '')
+  console.log(`got a new message from the server: ${data}`)
+  switch (data) {
+    case 'created':
+      isInitiator = true;
+      loadLocalStream(recording)    
+      break;
+    case 'join':
+      isChannelReady = true;
+      loadLocalStream(recording)    
+      break;
+      
+    case 'full':
+      console.log('Room ' + room + ' is full');
+      break;
+
+    case 'joined':
+      isChannelReady = true;
+      maybeStart()    
+      break;
+  
+    default:
+      handleWebRTC(data)
+      break;
+  }
+}
+  
+//   'created', function(room) {
+//   console.log('Created room ' + room);
+//   isInitiator = true;
+// });
+
+// socket.on('full', function(room) {
+//   console.log('Room ' + room + ' is full');
+// });
+
+// socket.on('join', function (room){
+//   console.log('Another peer made a request to join room ' + room);
+//   console.log('This peer is the initiator of room ' + room + '!');
+//   isChannelReady = true;
+// });
+
+// socket.on('joined', function(room) {
+//   console.log('joined: ' + room);
+//   isChannelReady = true;
+// });
+
+// socket.on('log', function(array) {
+//   console.log.apply(console, array);
+// });
+
+////////////////////////////////////////////////
+
 // This client receives a message
-socket.on('message', function(message) {
+function handleWebRTC(message) {
   console.log('Client received message:', message);
   if (message === 'got user media') {
     maybeStart();
@@ -86,36 +151,9 @@ socket.on('message', function(message) {
   } else if (message === 'bye' && isStarted) {
     handleRemoteHangup();
   }
-});
+}
 
 ////////////////////////////////////////////////////
-
-var localVideo = document.getElementById('localVideo');
-var remoteVideo = document.querySelector('#remoteVideo');
-
-// navigator.mediaDevices.getUserMedia({
-//   audio: false,
-//   video: false
-// })
-// .then(gotStream)
-// .catch(function(e) {
-//   alert('getUserMedia() error: ' + e.name);
-// });
-
-var recording = prompt("Input recording name:")
-loadLocalStream(recording)
-
-function loadLocalStream(recording) {
-  console.log(`Adding local stream from file ${recording}.`);
-  var localVideo = document.getElementById('localVideo');
-  localVideo.src = `./resources/${recording}`
-  localVideo.play()
-  localStream = localVideo.captureStream();
-  sendMessage('got user media');
-  if (isInitiator) {
-    maybeStart();
-  }
-}
 
 var constraints = {
   video : true,
