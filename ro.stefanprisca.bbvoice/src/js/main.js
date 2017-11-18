@@ -91,6 +91,7 @@ socket.onmessage = function (evnt){
   var socketMsg = JSON.parse(data)
   var pId = socketMsg.ID
   var message = socketMsg.Message
+  console.log('Client received message:', message)
   switch (message) {
     case 'created':
       isInitiating = false
@@ -115,15 +116,13 @@ socket.onmessage = function (evnt){
       break
   
     default:
-      handleWebRTC(message)
+      handleWebRTC(pId, message)
       break;
   }
 }
 
 // This client receives a message
 function handleWebRTC(pId, message) {
-  console.log('Client received message:', message, isStarted(pId))
-
   if (message.type === 'offer') {
     if (isInitiating && !isStarted(pId)) {
       maybeStart(pId);
