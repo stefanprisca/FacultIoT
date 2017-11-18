@@ -36,7 +36,7 @@ function sendMessage(message) {
   socket.send(JSON.stringify({ id:socketId, message: message }))
 }
 
-var recording = "1.m4a"//prompt("Input recording name:")
+// var recording = prompt("Input recording name:")
 
 socket.onopen = function () {
   if (room !== '') {
@@ -45,48 +45,56 @@ socket.onopen = function () {
   }
 }
 
-var localVideo = document.getElementById('localVideo');
+// var localVideo = document.getElementById('localVideo');
+// var remoteVideo = document.querySelector('#remoteVideo');
+
+// function loadLocalStream(recording) {
+//   if(streamLoaded){
+//     console.log("Stream already")
+//     return
+//   }
+//   console.log(`Adding local stream from file ${recording}.`);
+//   var localVideo = document.getElementById('localVideo');
+//   localVideo.src = `./resources/${recording}`
+//   localVideo.play()
+//   localStream = localVideo.captureStream();
+//   sendMessage('got user media');
+//   streamLoaded = true
+// }
+
+
+var localVideo = document.querySelector('#localVideo');
 var remoteVideo = document.querySelector('#remoteVideo');
 
-// navigator.mediaDevices.getUserMedia({
-//   audio: false,
-//   video: false
-// })
-// .then(gotStream)
-// .catch(function(e) {;
-//   alert('getUserMedia() error: ' + e.name);
-// });
+navigator.mediaDevices.getUserMedia({
+  audio: false,
+  video: true
+})
+.then(gotStream)
+.catch(function(e) {
+  alert('getUserMedia() error: ' + e.name);
+});
 
-
-function loadLocalStream(recording) {
-  if(streamLoaded){
-    console.log("Stream already")
-    return
-  }
-  console.log(`Adding local stream from file ${recording}.`);
-  var localVideo = document.getElementById('localVideo');
-  localVideo.src = `./resources/${recording}`
-  localVideo.play()
-  localStream = localVideo.captureStream();
+function gotStream(stream) {
+  console.log('Adding local stream.');
+  localVideo.src = window.URL.createObjectURL(stream);
+  localStream = stream;
   sendMessage('got user media');
   if (isInitiator) {
     maybeStart();
   }
-  streamLoaded = true
 }
+
 
 socket.onmessage = function (message){
   var data = message.data.replace('\n', '')
-  console.log(`got a new message from the server: ${data}`)
   switch (data) {
     case '"created"':
       isInitiator = true;
-      loadLocalStream(recording)    
       break;
+
     case '"join"':
       isChannelReady = true;
-      loadLocalStream(recording)
-      maybeStart() 
       break;
       
     case '"full"':
@@ -95,55 +103,31 @@ socket.onmessage = function (message){
 
     case '"joined"':
       isChannelReady = true;
-      maybeStart()    
       break;
+    
+    case '"got user media"':
+      maybeStart()
+      break
   
     default:
       handleWebRTC(data)
       break;
   }
 }
-  
-//   'created', function(room) {
-//   console.log('Created room ' + room);
-//   isInitiator = true;
-// });
-
-// socket.on('full', function(room) {
-//   console.log('Room ' + room + ' is full');
-// });
-
-// socket.on('join', function (room){
-//   console.log('Another peer made a request to join room ' + room);
-//   console.log('This peer is the initiator of room ' + room + '!');
-//   isChannelReady = true;
-// });
-
-// socket.on('joined', function(room) {
-//   console.log('joined: ' + room);
-//   isChannelReady = true;
-// });
-
-// socket.on('log', function(array) {
-//   console.log.apply(console, array);
-// });
-
-////////////////////////////////////////////////
 
 // This client receives a message
 function handleWebRTC(data) {
-  console.log('Client received message:', data);
   var message = JSON.parse(data)
-  console.log(`The message type is ${message.type}`)
+  console.log('Client received message:', message, isStarted);
 
   if (message.type === 'offer') {
     if (!isInitiator && !isStarted) {
       maybeStart();
     }
-    console.log("--------- Got a new offer for joining the RTC connection!")
     pc.setRemoteDescription(new RTCSessionDescription(message));
     doAnswer();
   } else if (message.type === 'answer' && isStarted) {
+    console.log('Received an answer from the other side, setting remote description')
     pc.setRemoteDescription(new RTCSessionDescription(message));
   } else if (message.type === 'candidate' && isStarted) {
     var candidate = new RTCIceCandidate({
@@ -158,25 +142,11 @@ function handleWebRTC(data) {
 
 ////////////////////////////////////////////////////
 
-var constraints = {
-  video : true,
-  audio: true
-};
-
-console.log('Getting user media with constraints', constraints);
-
-if (location.hostname !== 'localhost') {
-  requestTurn(
-    'https://computeengineondemand.appspot.com/turn?username=41784574&key=4080218913'
-  );
-}
-
 function maybeStart() {
   console.log('>>>>>>> maybeStart() ', isStarted, localStream, isChannelReady);
   if (!isStarted && typeof localStream !== 'undefined' && isChannelReady) {
     console.log('>>>>>> creating peer connection');
     createPeerConnection();
-    pc.addStream(localStream);
     isStarted = true;
     console.log('isInitiator', isInitiator);
     if (isInitiator) {
@@ -185,17 +155,18 @@ function maybeStart() {
   }
 }
 
-window.onbeforeunload = function() {
-  sendMessage('bye');
-};
+// window.onbeforeunload = function() {
+//   sendMessage('bye');
+// };
 
 /////////////////////////////////////////////////////////
 
 function createPeerConnection() {
   try {
     pc = new RTCPeerConnection(null);
+    pc.addStream(localStream);
     pc.onicecandidate = handleIceCandidate;
-    pc.onaddstream = handleRemoteStreamAdded;
+    pc.ontrack = handleRemoteTrackAdded
     pc.onremovestream = handleRemoteStreamRemoved;
     console.log('Created RTCPeerConnnection');
   } catch (e) {
@@ -219,10 +190,11 @@ function handleIceCandidate(event) {
   }
 }
 
-function handleRemoteStreamAdded(event) {
+function handleRemoteTrackAdded(event) {
   console.log('Remote stream added.');
-  remoteVideo.src = window.URL.createObjectURL(event.stream);
-  remoteStream = event.stream;
+  var stream = event.streams[0]
+  remoteVideo.src = window.URL.createObjectURL(stream);
+  remoteStream = stream;
 }
 
 function handleCreateOfferError(event) {

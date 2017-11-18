@@ -103,8 +103,10 @@ func serve(routerBox chan SocketRequest, routes RouteMap) {
 			break
 		default:
 			routes.lock.Lock()
-			for _, route := range routes.Routes {
-				route.Channel <- x.Message
+			for id, route := range routes.Routes {
+				if id != x.ID {
+					route.Channel <- x.Message
+				}
 			}
 			routes.lock.Unlock()
 			break
