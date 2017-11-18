@@ -27,7 +27,7 @@ type RouteMap struct {
 	lock   *sync.Mutex
 }
 
-type SocketRequest struct {
+type SocketMessage struct {
 	ID      string
 	Message interface{}
 }
@@ -36,7 +36,7 @@ func main() {
 	routes := RouteMap{}
 	routes.lock = new(sync.Mutex)
 	routes.Routes = make(map[string]*Route)
-	routerBox := make(chan SocketRequest)
+	routerBox := make(chan SocketMessage)
 	http.HandleFunc("/websocket", func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Got a new request: %v \n", r.URL)
 		id := r.URL.Query().Get("id")
@@ -64,12 +64,12 @@ func makeNewRoute() *Route {
 	return &Route{channel, tree}
 }
 
-func readMessages(con *websocket.Conn, routerBox chan SocketRequest) {
+func readMessages(con *websocket.Conn, routerBox chan SocketMessage) {
 	readDelay := 5 * time.Millisecond
 	for {
 		time.Sleep(readDelay)
 
-		nextReq := &SocketRequest{}
+		nextReq := &SocketMessage{}
 		Err0(con.ReadJSON(nextReq))
 		if nextReq.ID != "" {
 			log.Printf("Received new frame on the websocket: %v \n", nextReq)
@@ -85,33 +85,33 @@ func publishMessages(conn *websocket.Conn, channel chan interface{}) {
 	}
 }
 
-func serve(routerBox chan SocketRequest, routes RouteMap) {
+func serve(routerBox chan SocketMessage, routes RouteMap) {
 	for x := range routerBox {
 		log.Printf("@serving %s: %s\n", x.ID, x.Message)
 		switch x.Message {
 		case "create or join":
 			if len(routes.Routes) >= 2 {
-				routes.Routes[x.ID].Channel <- "join"
-				for id, route := range routes.Routes {
-					if id != x.ID {
-						route.Channel <- "joined"
-					}
-				}
+				routes.Routes[x.ID].Channel <- SocketMessage{x.ID, "join"}
+				broadcastMessage(x.ID, SocketMessage{x.ID, "newcommer"}, routes)
 			} else {
-				routes.Routes[x.ID].Channel <- "created"
+				routes.Routes[x.ID].Channel <- SocketMessage{x.ID, "created"}
 			}
 			break
 		default:
-			routes.lock.Lock()
-			for id, route := range routes.Routes {
-				if id != x.ID {
-					route.Channel <- x.Message
-				}
-			}
-			routes.lock.Unlock()
+			broadcastMessage(x.ID, x, routes)
 			break
 		}
 	}
+}
+
+func broadcastMessage(senderId string, message interface{}, routes RouteMap) {
+	routes.lock.Lock()
+	for id, route := range routes.Routes {
+		if id != senderId {
+			route.Channel <- message
+		}
+	}
+	routes.lock.Unlock()
 }
 
 func Err0(err error) {
