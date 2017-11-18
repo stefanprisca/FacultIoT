@@ -5,7 +5,6 @@ var isInitiating = true
 var streamLoaded = false
 var localStream;
 var pcs = {};
-var remoteStream;
 var turnReady;
 
 var startedPeers = {}
@@ -37,9 +36,9 @@ var room = 'foo';
 
 var socket = new WebSocket('ws://127.0.0.1:8124/websocket?id='+socketId)
 
-function sendMessage(message) {
+function sendMessage(message, destination = "") {
   console.log('Client sending message: ', message);
-  socket.send(JSON.stringify({ id:socketId, message: message }))
+  socket.send(JSON.stringify({ id:socketId, message: message, destination: destination }))
 }
 
 // var recording = prompt("Input recording name:")
@@ -91,15 +90,14 @@ socket.onmessage = function (evnt){
   var socketMsg = JSON.parse(data)
   var pId = socketMsg.ID
   var message = socketMsg.Message
-  console.log('Client received message:', message)
+  console.log('Client received message:', message, pId)
   switch (message) {
     case 'created':
       isInitiating = false
       break
+    
     case 'join':
       isChannelReady = true;
-
-      makeNewVideoElement()
       break;
       
     case 'full':
@@ -107,11 +105,11 @@ socket.onmessage = function (evnt){
       break;
 
     case 'newcommer':
+      makeNewVideoElement()
       isChannelReady = true;
       break;
     
     case 'got user media':
-      makeNewVideoElement()
       maybeStart(pId)
       break
   
@@ -125,12 +123,13 @@ socket.onmessage = function (evnt){
 function handleWebRTC(pId, message) {
   if (message.type === 'offer') {
     if (isInitiating && !isStarted(pId)) {
+      makeNewVideoElement()
       maybeStart(pId);
     }
     pcs[pId].setRemoteDescription(new RTCSessionDescription(message));
     doAnswer(pId);
   } else if (message.type === 'answer' && isStarted(pId)) {
-    console.log('Received an answer from the other side, setting remote description')
+    console.log('Received an answer from the other side, setting remote description', pId)
     pcs[pId].setRemoteDescription(new RTCSessionDescription(message));
   } else if (message.type === 'candidate' && isStarted(pId)) {
     var candidate = new RTCIceCandidate({
@@ -146,9 +145,9 @@ function handleWebRTC(pId, message) {
 ////////////////////////////////////////////////////
 
 function maybeStart(pId) {
-  console.log('>>>>>>> maybeStart() ', isStarted[pId], localStream, isChannelReady);
+  console.log(`>>>>>>> maybeStart() pid = ${pId}`, isStarted[pId], localStream, isChannelReady);
   if (!isStarted(pId) && typeof localStream !== 'undefined' && isChannelReady) {
-    console.log('>>>>>> creating peer connection');
+    console.log(`>>>>>> creating peer connection 4 ${pId}`);
     createPeerConnection(pId);
     startedPeers[pId] = true;
     if(!isInitiating) {
@@ -157,7 +156,8 @@ function maybeStart(pId) {
   }
 }
 
-function makeNewVideoElement(){
+function makeNewVideoElement() {
+  console.log(`@${socketId}: Making a new video element for the remote peer`)
   var video = document.createElement('video')
   video.controls = true
   video.autoplay = true
@@ -172,11 +172,11 @@ function createPeerConnection(pId) {
   try {
     var pc = new RTCPeerConnection(null);
     pc.addStream(localStream);
-    pc.onicecandidate = handleIceCandidate;
+    pc.onicecandidate = (event) => {handleIceCandidate(event, pId)};
     pc.ontrack = handleRemoteTrackAdded
     pc.onremovestream = handleRemoteStreamRemoved;
     pcs[pId] = pc
-    console.log('Created RTCPeerConnnection');
+    console.log(`Created RTCPeerConnnection for ${pId}`);
   } catch (e) {
     console.log('Failed to create PeerConnection, exception: ' + e.message);
     alert('Cannot create RTCPeerConnection object.');
@@ -186,7 +186,7 @@ function createPeerConnection(pId) {
 
 function doCall(pId) {
   console.log('Sending offer to peer');
-  pcs[pId].createOffer((sd) => {setLocalAndSendMessage(pId, sd)}, handleCreateOfferError);
+  pcs[pId].createOffer((sd) => {setLocalAndSendMessage(sd, pId)}, handleCreateOfferError);
 }
 
 function handleCreateOfferError(event) {
@@ -196,17 +196,17 @@ function handleCreateOfferError(event) {
 function doAnswer(pId) {
   console.log('Sending answer to peer.');
   pcs[pId].createAnswer().then(
-    (sd) => {setLocalAndSendMessage(pId, sd)},
+    (sd) => {setLocalAndSendMessage(sd, pId)},
     onCreateSessionDescriptionError
   );
 }
 
-function setLocalAndSendMessage(pId, sessionDescription) {
+function setLocalAndSendMessage(sessionDescription, pId) {
   // Set Opus as the preferred codec in SDP if Opus is present.
   //  sessionDescription.sdp = preferOpus(sessionDescription.sdp);
   pcs[pId].setLocalDescription(sessionDescription);
   console.log('setLocalAndSendMessage sending message', sessionDescription);
-  sendMessage(sessionDescription);
+  sendMessage(sessionDescription, pId);
   isInitiating = false
 }
 
@@ -243,7 +243,7 @@ function requestTurn(turnURL) {
   }
 }
 
-function handleIceCandidate(event) {
+function handleIceCandidate(event, pId) {
   console.log('icecandidate event: ', event);
   if (event.candidate) {
     sendMessage({
@@ -251,18 +251,17 @@ function handleIceCandidate(event) {
       label: event.candidate.sdpMLineIndex,
       id: event.candidate.sdpMid,
       candidate: event.candidate.candidate
-    });
+    }, pId);
   } else {
     console.log('End of candidates.');
   }
 }
 
 function handleRemoteTrackAdded(event) {
-  console.log('Remote stream added.');
+  console.log(`Remote stream added! ${openVideoSpots}`);
   var stream = event.streams[0]
   var remoteVideo = openVideoSpots.pop()
-  remoteVideo.src = window.URL.createObjectURL(stream);
-  remoteStream = stream;
+  remoteVideo.src = window.URL.createObjectURL(stream)
 }
 
 function handleRemoteStreamRemoved(event) {

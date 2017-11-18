@@ -28,8 +28,9 @@ type RouteMap struct {
 }
 
 type SocketMessage struct {
-	ID      string
-	Message interface{}
+	ID          string
+	Message     interface{}
+	Destination string
 }
 
 func main() {
@@ -91,14 +92,19 @@ func serve(routerBox chan SocketMessage, routes RouteMap) {
 		switch x.Message {
 		case "create or join":
 			if len(routes.Routes) >= 2 {
-				routes.Routes[x.ID].Channel <- SocketMessage{x.ID, "join"}
-				broadcastMessage(x.ID, SocketMessage{x.ID, "newcommer"}, routes)
+				routes.Routes[x.ID].Channel <- SocketMessage{x.ID, "join", ""}
+				broadcastMessage(x.ID, SocketMessage{x.ID, "newcommer", ""}, routes)
 			} else {
-				routes.Routes[x.ID].Channel <- SocketMessage{x.ID, "created"}
+				routes.Routes[x.ID].Channel <- SocketMessage{x.ID, "created", ""}
 			}
 			break
 		default:
-			broadcastMessage(x.ID, x, routes)
+			if x.Destination == "" {
+				broadcastMessage(x.ID, x, routes)
+			}else {
+				routes.Routes[x.Destination].Channel <- x
+			}
+
 			break
 		}
 	}
