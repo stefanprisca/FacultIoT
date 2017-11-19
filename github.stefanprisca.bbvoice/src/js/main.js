@@ -1,20 +1,33 @@
 'use strict';
 
-var isChannelReady = false
 var isInitiating = true
 var streamLoaded = false
-var localStream;
-var pcs = {};
-var turnReady;
 
-var startedPeers = {}
+const socketId = prompt("Enter user id:")
 
-function isStarted(pId){
-  var s = startedPeers[pId]
+var incomingConnections = {}
+var streams = {}
+var outgoingConnections = {}
+
+var turnReady
+
+var startedInputPeers = {}
+function isReceiving(pId){
+  var s = startedInputPeers[pId]
   return s !== undefined && s
 }
 
-const socketId = prompt("Enter user id:")
+var readyChannels = {}
+function isChannelReady(pId){
+  var s = readyChannels[pId]
+  return s !== undefined && s
+}
+
+var startedOutputPeers = {}
+function isSending(pId){
+  var s = startedOutputPeers[pId]
+  return s !== undefined && s
+}
 
 var pcConfig = {
   'iceServers': [{
@@ -50,21 +63,6 @@ socket.onopen = function () {
   }
 }
 
-// function loadLocalStream(recording) {
-//   if(streamLoaded){
-//     console.log("Stream already")
-//     return
-//   }
-//   console.log(`Adding local stream from file ${recording}.`);
-//   var localVideo = document.getElementById('localVideo');
-//   localVideo.src = `./resources/${recording}`
-//   localVideo.play()
-//   localStream = localVideo.captureStream();
-//   sendMessage('got user media');
-//   streamLoaded = true
-// }
-
-
 var localVideo = document.querySelector('#localVideo');
 var remoteVideos = document.querySelector('#remoteVideos');
 var openVideoSpots = []
@@ -81,7 +79,7 @@ navigator.mediaDevices.getUserMedia({
 function gotStream(stream) {
   console.log('Adding local stream.')
   localVideo.src = window.URL.createObjectURL(stream)
-  localStream = stream
+  streams[socketId] = stream
   sendMessage('got user media')
 }
 
@@ -97,7 +95,7 @@ socket.onmessage = function (evnt){
       break
     
     case 'join':
-      isChannelReady = true;
+      readyChannels[pId] = true;
       break;
       
     case 'full':
@@ -105,12 +103,15 @@ socket.onmessage = function (evnt){
       break;
 
     case 'newcommer':
-      makeNewVideoElement()
-      isChannelReady = true;
+      // Someone new is comming. Maybe start sending them data
+      maybeStartSending(pId)
       break;
     
     case 'got user media':
-      maybeStart(pId)
+    // Someone wants to send me data, so make a new video element to receive it
+      makeNewVideoElement()
+      readyChannels[pId] = true;
+      maybeStartReceiving(pId);
       break
   
     default:
@@ -122,34 +123,51 @@ socket.onmessage = function (evnt){
 // This client receives a message
 function handleWebRTC(pId, message) {
   if (message.type === 'offer') {
-    if (isInitiating && !isStarted(pId)) {
+    if (isInitiating && !isReceiving(pId)) {
       makeNewVideoElement()
-      maybeStart(pId);
+      maybeStartReceiving(pId);
     }
-    pcs[pId].setRemoteDescription(new RTCSessionDescription(message));
+    incomingConnections[pId].setRemoteDescription(new RTCSessionDescription(message));
     doAnswer(pId);
-  } else if (message.type === 'answer' && isStarted(pId)) {
+  } else if (message.type === 'answer' && isSending(pId)) {
     console.log('Received an answer from the other side, setting remote description', pId)
-    pcs[pId].setRemoteDescription(new RTCSessionDescription(message));
-  } else if (message.type === 'candidate' && isStarted(pId)) {
+    outgoingConnections[pId].setRemoteDescription(new RTCSessionDescription(message));
+  } else if (message.type === 'candidate' && (isSending(pId) || isReceiving(pId))) {
     var candidate = new RTCIceCandidate({
       sdpMLineIndex: message.label,
       candidate: message.candidate
     });
-    pcs[pId].addIceCandidate(candidate);
-  } else if (message === 'bye' && isStarted) {
+    if(isSending(pId)) {
+      outgoingConnections[pId].addIceCandidate(candidate);
+    }
+    if(isReceiving(pId)) {
+      incomingConnections[pId].addIceCandidate(candidate);
+    }
+  } else if (message === 'bye') {
     handleRemoteHangup();
   }
 }
 
 ////////////////////////////////////////////////////
 
-function maybeStart(pId) {
-  console.log(`>>>>>>> maybeStart() pid = ${pId}`, isStarted[pId], localStream, isChannelReady);
-  if (!isStarted(pId) && typeof localStream !== 'undefined' && isChannelReady) {
-    console.log(`>>>>>> creating peer connection 4 ${pId}`);
-    createPeerConnection(pId);
-    startedPeers[pId] = true;
+function maybeStartSending(pId) {
+  console.log(`>>>>>>> maybeStart Sending pid = ${pId}`, isSending[pId], streams[socketId], isChannelReady);
+  if (!isSending(pId) && typeof streams[socketId] !== 'undefined') {
+    console.log(`>>>>>> creating outgoing peer connection 4 ${pId}`);
+    createOutputPeerConnection(pId);
+    startedOutputPeers[pId] = true;
+    if(!isInitiating) {
+      doCall(pId);
+    }
+  }
+}
+
+function maybeStartReceiving(pId) {
+  console.log(`>>>>>>> maybeStart Receiving () pid = ${pId}`, isReceiving[pId], streams[socketId], isChannelReady);
+  if (!isReceiving(pId) && isChannelReady(socketId)) {
+    console.log(`>>>>>> creating incoming peer connection for ${pId}`);
+    createInputPeerConnection(pId);
+    startedInputPeers[pId] = true;
     if(!isInitiating) {
       doCall(pId);
     }
@@ -168,15 +186,31 @@ function makeNewVideoElement() {
 
 /////////////////////////////////////////////////////////
 
-function createPeerConnection(pId) {
+function createOutputPeerConnection(pId) {
   try {
     var pc = new RTCPeerConnection(null);
-    pc.addStream(localStream);
+    pc.addStream(streams[socketId])
+    pc.onicecandidate = (event) => {handleIceCandidate(event, pId)};
+    // pc.ontrack = handleRemoteTrackAdded
+    // pc.onremovestream = handleRemoteStreamRemoved;
+    outgoingConnections[pId] = pc
+    console.log(`Created Output RTCPeerConnnection for ${pId}`);
+  } catch (e) {
+    console.log('Failed to create PeerConnection, exception: ' + e.message);
+    alert('Cannot create RTCPeerConnection object.');
+    return;
+  }
+}
+
+function createInputPeerConnection(pId) {
+  try {
+    var pc = new RTCPeerConnection(null);
+    pc.addStream(new MediaStream())
     pc.onicecandidate = (event) => {handleIceCandidate(event, pId)};
     pc.ontrack = handleRemoteTrackAdded
     pc.onremovestream = handleRemoteStreamRemoved;
-    pcs[pId] = pc
-    console.log(`Created RTCPeerConnnection for ${pId}`);
+    incomingConnections[pId] = pc
+    console.log(`Created Input RTCPeerConnnection for ${pId}`);
   } catch (e) {
     console.log('Failed to create PeerConnection, exception: ' + e.message);
     alert('Cannot create RTCPeerConnection object.');
@@ -186,7 +220,8 @@ function createPeerConnection(pId) {
 
 function doCall(pId) {
   console.log('Sending offer to peer');
-  pcs[pId].createOffer((sd) => {setLocalAndSendMessage(sd, pId)}, handleCreateOfferError);
+  outgoingConnections[pId].createOffer(
+    (sd) => {setOutgoingLocalAndSendMessage(sd, pId)}, handleCreateOfferError);
 }
 
 function handleCreateOfferError(event) {
@@ -195,17 +230,26 @@ function handleCreateOfferError(event) {
 
 function doAnswer(pId) {
   console.log('Sending answer to peer.');
-  pcs[pId].createAnswer().then(
-    (sd) => {setLocalAndSendMessage(sd, pId)},
+  incomingConnections[pId].createAnswer().then(
+    (sd) => {setIncomingLocalAndSendMessage(sd, pId)},
     onCreateSessionDescriptionError
   );
 }
 
-function setLocalAndSendMessage(sessionDescription, pId) {
+function setOutgoingLocalAndSendMessage(sessionDescription, pId) {
   // Set Opus as the preferred codec in SDP if Opus is present.
   //  sessionDescription.sdp = preferOpus(sessionDescription.sdp);
-  pcs[pId].setLocalDescription(sessionDescription);
-  console.log('setLocalAndSendMessage sending message', sessionDescription);
+  outgoingConnections[pId].setLocalDescription(sessionDescription);
+  console.log('setOutgoingLocalAndSendMessage sending message', sessionDescription);
+  sendMessage(sessionDescription, pId);
+  isInitiating = false
+}
+
+function setIncomingLocalAndSendMessage(sessionDescription, pId) {
+  // Set Opus as the preferred codec in SDP if Opus is present.
+  //  sessionDescription.sdp = preferOpus(sessionDescription.sdp);
+  incomingConnections[pId].setLocalDescription(sessionDescription);
+  console.log('setIncomingLocalAndSendMessage sending message', sessionDescription);
   sendMessage(sessionDescription, pId);
   isInitiating = false
 }
@@ -258,14 +302,14 @@ function handleIceCandidate(event, pId) {
 }
 
 function handleRemoteTrackAdded(event) {
-  console.log(`Remote stream added! ${openVideoSpots}`);
+  console.log(`Remote stream added! ${openVideoSpots}`)
   var stream = event.streams[0]
   var remoteVideo = openVideoSpots.pop()
   remoteVideo.src = window.URL.createObjectURL(stream)
 }
 
 function handleRemoteStreamRemoved(event) {
-  console.log('Remote stream removed. Event: ', event);
+  console.log('Remote stream removed. Event: ', event)
 }
 
 function hangup() {

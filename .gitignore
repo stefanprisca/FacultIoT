@@ -6,3 +6,9 @@
 **/node_modules/*
 /kademlia/venv
 **/resources/*
+**/*.exe
+**/pkg/*
+**/bin/*
+**/github.com/*
+**/golang.org/*
+**/sourcegraph.com/*
