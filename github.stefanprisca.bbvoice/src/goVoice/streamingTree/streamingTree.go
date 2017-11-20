@@ -1,35 +1,22 @@
 package streamingTree
 
-import (
-	"log"
-)
+import "log"
 
 const branchFactor = 2
 
 type StreamingTree struct {
 	Root     string
-	Children []StreamingTree
+	Children []*StreamingTree
 }
 
-func (st StreamingTree) AddChild(childId string) StreamingTree {
-	st.Children = append(st.Children, StreamingTree{Root: childId})
-	return st
+func AddChild(st *StreamingTree, childId string) string {
+	parent := FindFreeStreamer(st)
+	parent.Children = append(parent.Children, &StreamingTree{Root: childId})
+	return parent.Root
 }
 
-func FindFreeStreamers(streamingTrees []StreamingTree) []string {
-	streamers := []string{}
-
-	for _, st := range streamingTrees {
-		log.Printf("looking for streamers: %v %v\n", st.Root, st.Children)
-		streamers = append(streamers, findFreeStreamer(st))
-	}
-
-	log.Printf("Found free streamers: %v(%d) \n", streamers, len(streamers))
-	return streamers
-}
-
-func findFreeStreamer(st StreamingTree) string {
-	queue := []StreamingTree{st}
+func FindFreeStreamer(st *StreamingTree) *StreamingTree {
+	queue := []*StreamingTree{st}
 
 	for {
 		if len(queue) == 0 {
@@ -38,8 +25,14 @@ func findFreeStreamer(st StreamingTree) string {
 		root := queue[0]
 		queue = queue[1:]
 
+		log.Printf("Finding free streamer in %v", root)
+		if root.Children == nil {
+			root.Children = []*StreamingTree{}
+			return root
+		}
+
 		if len(root.Children) < branchFactor {
-			return root.Root
+			return root
 		}
 
 		for _, child := range root.Children {
@@ -47,5 +40,5 @@ func findFreeStreamer(st StreamingTree) string {
 		}
 	}
 
-	return ""
+	return nil
 }

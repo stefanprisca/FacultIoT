@@ -207,7 +207,7 @@ function createInputPeerConnection(pId) {
     var pc = new RTCPeerConnection(null);
     pc.addStream(new MediaStream())
     pc.onicecandidate = (event) => {handleIceCandidate(event, pId)};
-    pc.ontrack = handleRemoteTrackAdded
+    pc.ontrack = (e) => handleRemoteTrackAdded(e, pId)
     pc.onremovestream = handleRemoteStreamRemoved;
     incomingConnections[pId] = pc
     console.log(`Created Input RTCPeerConnnection for ${pId}`);
@@ -301,11 +301,12 @@ function handleIceCandidate(event, pId) {
   }
 }
 
-function handleRemoteTrackAdded(event) {
+function handleRemoteTrackAdded(event, pId) {
   console.log(`Remote stream added! ${openVideoSpots}`)
   var stream = event.streams[0]
   var remoteVideo = openVideoSpots.pop()
   remoteVideo.src = window.URL.createObjectURL(stream)
+  streams[pId] = stream
 }
 
 function handleRemoteStreamRemoved(event) {

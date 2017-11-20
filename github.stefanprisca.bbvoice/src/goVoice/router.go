@@ -22,11 +22,11 @@ var upgrader = websocket.Upgrader{
 type Streamer struct {
 	ID      string
 	Channel chan (interface{})
-	Tree    st.StreamingTree
+	Tree    *st.StreamingTree
 }
 
 type StreamingMap struct {
-	Streamers map[string]Streamer
+	Streamers map[string]*Streamer
 	lock      *sync.Mutex
 }
 
@@ -34,8 +34,8 @@ func (sm StreamingMap) getStreamingTrees() []st.StreamingTree {
 	log.Printf("Getting trees %d", len(sm.Streamers))
 	result := []st.StreamingTree{}
 	for _, s := range sm.Streamers {
-		if s.Tree.Root != "" {
-			result = append(result, s.Tree)
+		if s.Tree != nil {
+			result = append(result, *s.Tree)
 		}
 	}
 	return result
@@ -50,7 +50,7 @@ type SocketMessage struct {
 func main() {
 	streams := &StreamingMap{}
 	streams.lock = new(sync.Mutex)
-	streams.Streamers = make(map[string]Streamer)
+	streams.Streamers = make(map[string]*Streamer)
 	routerBox := make(chan SocketMessage)
 	upgradeHttpRequestsToSockets(streams, routerBox)
 
@@ -66,7 +66,7 @@ func upgradeHttpRequestsToSockets(streams *StreamingMap, routerBox chan SocketMe
 
 		route := makeNewStreamer(id)
 		streams.lock.Lock()
-		streams.Streamers[id] = route
+		streams.Streamers[id] = &route
 		streams.lock.Unlock()
 
 		con := Err1(upgrader.Upgrade(w, r, nil)).(*websocket.Conn)
@@ -126,31 +126,44 @@ func onCreateOrJoin(x SocketMessage, streams *StreamingMap) {
 		// 2) Create streaming tree
 		streams.Streamers[x.ID].Channel <- SocketMessage{x.ID, "join", ""}
 
-		streamingTrees := streams.getStreamingTrees()
-		parents := st.FindFreeStreamers(streamingTrees)
-		addChildNode(parents, x.ID, streams)
+		parents := addChildNode(x.ID, streams)
 		multicastMessage(x.ID, SocketMessage{x.ID, "newcommer", ""}, parents, *streams)
 
-		// streamer := createNewStreamer(x.ID, *streams)
-		// addStreamer(x.ID, streamer, streams)
+		newStreamer := streams.Streamers[x.ID]
+		newStreamer.Tree = makeNewStreamingTree(x.ID, *streams)
 	} else {
 		streamer := streams.Streamers[x.ID]
-		streamer.Tree = st.StreamingTree{Root: x.ID}
-		streams.Streamers[x.ID] = streamer
+		streamer.Tree = &st.StreamingTree{Root: x.ID}
 		streams.Streamers[x.ID].Channel <- SocketMessage{x.ID, "created", ""}
 	}
 }
 
-func addChildNode(parents []string, childId string, streams *StreamingMap) {
-	for _, parentId := range parents {
-		parentStreamer := streams.Streamers[parentId]
-		parentStreamer.Tree = parentStreamer.Tree.AddChild(childId)
-		streams.Streamers[parentId] = parentStreamer
+func addChildNode(childId string, streams *StreamingMap) []string {
+	keys := getMapKeysExcept(streams.Streamers, childId)
+	parents := []string{}
+	for _, k := range keys {
+		streamer := streams.Streamers[k]
+		parent := st.AddChild(streamer.Tree, childId)
+		log.Printf("Updated tree for parent: %s - %v", k, *(streams.Streamers[k].Tree))
+		parents = append(parents, parent)
 	}
+
+	return parents
 }
 
-func addStreamer(id string, s Streamer, streams *StreamingMap) {
-	streams.Streamers[id] = s
+func makeNewStreamingTree(id string, streams StreamingMap) *st.StreamingTree {
+	return &st.StreamingTree{Root: id}
+}
+
+func getMapKeysExcept(m map[string]*Streamer, id string) []string {
+	keys := []string{}
+	for k := range m {
+		if k == id {
+			continue
+		}
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 func routeMessage(x SocketMessage, streams StreamingMap) {
