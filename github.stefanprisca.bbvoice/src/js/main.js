@@ -91,11 +91,12 @@ socket.onmessage = function (evnt){
   console.log('Client received message:', message, pId)
   switch (message) {
     case 'created':
+      readyChannels[socketId] = true
       isInitiating = false
       break
     
     case 'join':
-      readyChannels[pId] = true;
+      readyChannels[socketId] = true
       break;
       
     case 'full':
@@ -109,7 +110,7 @@ socket.onmessage = function (evnt){
     
     case 'got user media':
     // Someone wants to send me data, so make a new video element to receive it
-      makeNewVideoElement()
+      makeNewVideoElement(pId)
       readyChannels[pId] = true;
       maybeStartReceiving(pId);
       break
@@ -124,7 +125,7 @@ socket.onmessage = function (evnt){
 function handleWebRTC(pId, message) {
   if (message.type === 'offer') {
     if (isInitiating && !isReceiving(pId)) {
-      makeNewVideoElement()
+      makeNewVideoElement(pId)
       maybeStartReceiving(pId);
     }
     incomingConnections[pId].setRemoteDescription(new RTCSessionDescription(message));
@@ -163,23 +164,22 @@ function maybeStartSending(pId) {
 }
 
 function maybeStartReceiving(pId) {
-  console.log(`>>>>>>> maybeStart Receiving () pid = ${pId}`, isReceiving[pId], streams[socketId], isChannelReady);
+  console.log(`>>>>>>> maybeStart Receiving () pid = ${pId}`, 
+    isReceiving(pId), streams[socketId], isChannelReady(socketId));
   if (!isReceiving(pId) && isChannelReady(socketId)) {
     console.log(`>>>>>> creating incoming peer connection for ${pId}`);
     createInputPeerConnection(pId);
     startedInputPeers[pId] = true;
-    if(!isInitiating) {
-      doCall(pId);
-    }
   }
 }
 
-function makeNewVideoElement() {
+function makeNewVideoElement(pId) {
   console.log(`@${socketId}: Making a new video element for the remote peer`)
   var video = document.createElement('video')
   video.controls = true
   video.autoplay = true
   video.muted = true
+  video.id = pId
   remoteVideos.appendChild(video)
   openVideoSpots.push(video)
 }
