@@ -7,13 +7,8 @@ const socketId = prompt("Enter user id:")
 document.getElementById("myName").innerText = socketId
 
 var incomingConnections = {}
-function addIncomingConnection(treeId, pId, pc){
-  var tree = incomingConnections[treeId]
-  if (tree === undefined) {
-    tree = {}
-  }
-  tree[pId] = pc
-  incomingConnections[treeId] = tree
+function addIncomingConnection(treeId, pc){
+  incomingConnections[treeId] = pc
 }
 
 var streams = {}
@@ -37,22 +32,13 @@ function isChannelReady(pId){
 }
 
 var startedInputPeers = {}
-function isReceiving(pId, treeId){
-  var tree = startedInputPeers[treeId]
-  if (tree === undefined) {
-    return false
-  }
-  var s = tree[pId]
+function isReceiving(treeId){
+  var s = startedInputPeers[treeId]
   return s !== undefined && s
 }
 
-function startedReceiving(treeId, pId){
-  var tree = startedInputPeers[treeId]
-  if (tree === undefined) {
-    tree = {}
-  }
-  tree[pId] = true
-  startedInputPeers[treeId] = tree
+function startedReceiving(treeId){
+  startedInputPeers[treeId] = true
 }
 
 var startedOutputPeers = {}
@@ -173,18 +159,18 @@ socket.onmessage = function (evnt){
 // This client receives a message
 function handleWebRTC(pId, treeId, message) {
   if (message.type === 'offer') {
-    if (isInitiating && !isReceiving(pId, treeId)) {
+    if (isInitiating && !isReceiving(treeId)) {
       makeNewVideoElement(pId)
       maybeStartReceiving(pId, treeId);
     }
-    incomingConnections[treeId][pId]
+    incomingConnections[treeId]
         .setRemoteDescription(new RTCSessionDescription(message));
     doAnswer(pId, treeId);
   } else if (message.type === 'answer' && isSending(pId, treeId)) {
     console.log('Received an answer from the other side, setting remote description', pId)
     outgoingConnections[treeId][pId]
         .setRemoteDescription(new RTCSessionDescription(message));
-  } else if (message.type === 'candidate' && (isSending(pId, treeId) || isReceiving(pId, treeId))) {
+  } else if (message.type === 'candidate' && (isSending(pId, treeId) || isReceiving(treeId))) {
     var candidate = new RTCIceCandidate({
       sdpMLineIndex: message.label,
       candidate: message.candidate
@@ -192,8 +178,8 @@ function handleWebRTC(pId, treeId, message) {
     if(isSending(pId, treeId)) {
       outgoingConnections[treeId][pId].addIceCandidate(candidate);
     }
-    if(isReceiving(pId, treeId)) {
-      incomingConnections[treeId][pId].addIceCandidate(candidate);
+    if(isReceiving(treeId)) {
+      incomingConnections[treeId].addIceCandidate(candidate);
     }
   } else if (message === 'bye') {
     handleRemoteHangup();
@@ -218,11 +204,11 @@ function maybeStartSending(pId, treeId) {
 
 function maybeStartReceiving(pId, treeId) {
   console.log(`>>>>>>> maybeStart Receiving () pid = ${pId}`, 
-    isReceiving(pId, treeId), streams[treeId], isChannelReady(socketId));
-  if (!isReceiving(pId, treeId) && isChannelReady(socketId)) {
+    isReceiving(treeId), streams[treeId], isChannelReady(socketId));
+  if (!isReceiving(treeId) && isChannelReady(socketId)) {
     console.log(`>>>>>> creating incoming peer connection for ${pId} in tree #${treeId}`);
     createInputPeerConnection(pId, treeId);
-    startedReceiving(treeId, pId)
+    startedReceiving(treeId)
   }
 }
 
@@ -260,9 +246,9 @@ function createInputPeerConnection(pId, treeId) {
     var pc = new RTCPeerConnection(null);
     pc.addStream(new MediaStream())
     pc.onicecandidate = (event) => {handleIceCandidate(event, pId, treeId)};
-    pc.ontrack = (e) => handleRemoteTrackAdded(e, pId, treeId)
+    pc.ontrack = (e) => handleRemoteTrackAdded(e, treeId)
     pc.onremovestream = handleRemoteStreamRemoved;
-    addIncomingConnection(treeId, pId, pc)
+    addIncomingConnection(treeId, pc)
     console.log(`Created Input RTCPeerConnnection for ${pId} in tree #${treeId}`);
   } catch (e) {
     console.log('Failed to create PeerConnection, exception: ' + e.message);
@@ -283,7 +269,7 @@ function handleCreateOfferError(event) {
 
 function doAnswer(pId, treeId) {
   console.log(`'Sending answer to peer. <${pId}> in tree #${treeId}`);
-  incomingConnections[treeId][pId].createAnswer().then(
+  incomingConnections[treeId].createAnswer().then(
     (sd) => {setIncomingLocalAndSendMessage(sd, pId, treeId)},
     onCreateSessionDescriptionError
   );
@@ -301,7 +287,7 @@ function setOutgoingLocalAndSendMessage(sessionDescription, pId, treeId) {
 function setIncomingLocalAndSendMessage(sessionDescription, pId, treeId) {
   // Set Opus as the preferred codec in SDP if Opus is present.
   //  sessionDescription.sdp = preferOpus(sessionDescription.sdp);
-  incomingConnections[treeId][pId].setLocalDescription(sessionDescription);
+  incomingConnections[treeId].setLocalDescription(sessionDescription);
   console.log('setIncomingLocalAndSendMessage sending message', sessionDescription);
   sendMessage(sessionDescription, pId, treeId);
   isInitiating = false
@@ -354,12 +340,13 @@ function handleIceCandidate(event, pId, treeId) {
   }
 }
 
-function handleRemoteTrackAdded(event, pId) {
+function handleRemoteTrackAdded(event, treeId) {
   console.log(`Remote stream added! ${openVideoSpots}`)
   var stream = event.streams[0]
   var remoteVideo = openVideoSpots.pop()
   remoteVideo.src = window.URL.createObjectURL(stream)
-  streams[pId] = stream
+  streams[treeId] = stream
+  sendMessage("got parent stream", "", treeId)
 }
 
 function handleRemoteStreamRemoved(event) {

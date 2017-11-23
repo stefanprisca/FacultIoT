@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	st "github.com/goVoice/streamingTree"
+	st "goVoice/streamingTree"
 
 	"github.com/gorilla/websocket"
 )
@@ -21,9 +21,10 @@ var upgrader = websocket.Upgrader{
 }
 
 type Streamer struct {
-	ID      string
-	Channel chan (interface{})
-	Tree    *st.StreamingTree
+	ID              string
+	Channel         chan interface{}
+	ResponseChannel chan interface{}
+	Tree            *st.StreamingTree
 }
 
 type StreamingMap struct {
@@ -84,7 +85,8 @@ func upgradeHttpRequestsToSockets(streams *StreamingMap, routerBox chan SocketMe
 func makeNewStreamer(id string) Streamer {
 	log.Printf("making new streamer %v \n", id)
 	channel := make(chan (interface{}))
-	return Streamer{ID: id, Channel: channel}
+	respChannel := make(chan interface{}, 20)
+	return Streamer{ID: id, Channel: channel, ResponseChannel: respChannel}
 }
 
 func readMessages(con *websocket.Conn, routerBox chan SocketMessage) {
@@ -115,6 +117,10 @@ func serve(routerBox chan SocketMessage, streams *StreamingMap) {
 		switch x.Message {
 		case "create or join":
 			go onCreateOrJoin(x, streams)
+			break
+		case "got parent stream":
+			log.Printf("Got parent stream message from %s on tree %s", x.ID, x.TreeID)
+			streams.Streamers[x.ID].ResponseChannel <- x
 			break
 		default:
 			go routeMessage(x, *streams)
@@ -196,7 +202,14 @@ func announceNewTree(tree *st.StreamingTree, treeID string, streams StreamingMap
 	rootStreamer := streams.Streamers[tree.Root]
 	for _, child := range tree.Children {
 		rootStreamer.Channel <- SocketMessage{child.Root, treeID, "newcommer", ""}
-		announceNewTree(child, treeID, streams)
+	}
+
+	for _, child := range tree.Children {
+		rsp := (<-streams.Streamers[child.Root].ResponseChannel).(SocketMessage)
+		log.Printf("Wanting to announce kid tree for %s in tree %s", child.Root, treeID)
+		if rsp.Message == "got parent stream" && rsp.TreeID == treeID {
+			announceNewTree(child, treeID, streams)
+		}
 	}
 }
 
