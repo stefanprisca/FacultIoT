@@ -4,18 +4,31 @@ var isInitiating = true
 var streamLoaded = false
 
 const socketId = prompt("Enter user id:")
+document.getElementById("myName").innerText = socketId
 
 var incomingConnections = {}
+function addIncomingConnection(treeId, pId, pc){
+  var tree = incomingConnections[treeId]
+  if (tree === undefined) {
+    tree = {}
+  }
+  tree[pId] = pc
+  incomingConnections[treeId] = tree
+}
+
 var streams = {}
+
 var outgoingConnections = {}
+function addOutgoingConnection(treeId, pId, pc){
+  var tree = outgoingConnections[treeId]
+  if (tree === undefined) {
+    tree = {}
+  }
+  tree[pId] = pc
+  outgoingConnections[treeId] = tree
+}
 
 var turnReady
-
-var startedInputPeers = {}
-function isReceiving(pId){
-  var s = startedInputPeers[pId]
-  return s !== undefined && s
-}
 
 var readyChannels = {}
 function isChannelReady(pId){
@@ -23,11 +36,46 @@ function isChannelReady(pId){
   return s !== undefined && s
 }
 
-var startedOutputPeers = {}
-function isSending(pId){
-  var s = startedOutputPeers[pId]
+var startedInputPeers = {}
+function isReceiving(pId, treeId){
+  var tree = startedInputPeers[treeId]
+  if (tree === undefined) {
+    return false
+  }
+  var s = tree[pId]
   return s !== undefined && s
 }
+
+function startedReceiving(treeId, pId){
+  var tree = startedInputPeers[treeId]
+  if (tree === undefined) {
+    tree = {}
+  }
+  tree[pId] = true
+  startedInputPeers[treeId] = tree
+}
+
+var startedOutputPeers = {}
+function isSending(pId, treeId){
+  
+  var tree = startedOutputPeers[treeId]
+  if (tree === undefined) {
+    return false
+  }
+
+  var s = tree[pId]
+  return s !== undefined && s
+}
+
+function startedSending(treeId, pId){
+  var tree = startedOutputPeers[treeId]
+  if (tree === undefined) {
+    tree = {}
+  }
+  tree[pId] = true
+  startedOutputPeers[treeId] = tree
+}
+
 
 var pcConfig = {
   'iceServers': [{
@@ -49,9 +97,9 @@ var room = 'foo';
 
 var socket = new WebSocket('ws://127.0.0.1:8124/websocket?id='+socketId)
 
-function sendMessage(message, destination = "") {
+function sendMessage(message, destination = "", treeId = "") {
   console.log('Client sending message: ', message);
-  socket.send(JSON.stringify({ id:socketId, message: message, destination: destination }))
+  socket.send(JSON.stringify({ id:socketId, treeID: treeId, message: message, destination: destination }))
 }
 
 // var recording = prompt("Input recording name:")
@@ -80,15 +128,16 @@ function gotStream(stream) {
   console.log('Adding local stream.')
   localVideo.src = window.URL.createObjectURL(stream)
   streams[socketId] = stream
-  sendMessage('got user media')
+  sendMessage('got user media', "", socketId)
 }
 
 socket.onmessage = function (evnt){
   var data = evnt.data.replace('\n', '')
   var socketMsg = JSON.parse(data)
   var pId = socketMsg.ID
+  var treeId = socketMsg.TreeID
   var message = socketMsg.Message
-  console.log('Client received message:', message, pId)
+  console.log(`Client received messagr < "${message}" > from ${pId} on tree < ${treeId} >`)
   switch (message) {
     case 'created':
       readyChannels[socketId] = true
@@ -105,44 +154,46 @@ socket.onmessage = function (evnt){
 
     case 'newcommer':
       // Someone new is comming. Maybe start sending them data
-      maybeStartSending(pId)
+      maybeStartSending(pId, treeId)
       break;
     
     case 'got user media':
     // Someone wants to send me data, so make a new video element to receive it
       makeNewVideoElement(pId)
       readyChannels[pId] = true;
-      maybeStartReceiving(pId);
+      maybeStartReceiving(pId, treeId);
       break
   
     default:
-      handleWebRTC(pId, message)
+      handleWebRTC(pId, treeId, message)
       break;
   }
 }
 
 // This client receives a message
-function handleWebRTC(pId, message) {
+function handleWebRTC(pId, treeId, message) {
   if (message.type === 'offer') {
-    if (isInitiating && !isReceiving(pId)) {
+    if (isInitiating && !isReceiving(pId, treeId)) {
       makeNewVideoElement(pId)
-      maybeStartReceiving(pId);
+      maybeStartReceiving(pId, treeId);
     }
-    incomingConnections[pId].setRemoteDescription(new RTCSessionDescription(message));
-    doAnswer(pId);
-  } else if (message.type === 'answer' && isSending(pId)) {
+    incomingConnections[treeId][pId]
+        .setRemoteDescription(new RTCSessionDescription(message));
+    doAnswer(pId, treeId);
+  } else if (message.type === 'answer' && isSending(pId, treeId)) {
     console.log('Received an answer from the other side, setting remote description', pId)
-    outgoingConnections[pId].setRemoteDescription(new RTCSessionDescription(message));
-  } else if (message.type === 'candidate' && (isSending(pId) || isReceiving(pId))) {
+    outgoingConnections[treeId][pId]
+        .setRemoteDescription(new RTCSessionDescription(message));
+  } else if (message.type === 'candidate' && (isSending(pId, treeId) || isReceiving(pId, treeId))) {
     var candidate = new RTCIceCandidate({
       sdpMLineIndex: message.label,
       candidate: message.candidate
     });
-    if(isSending(pId)) {
-      outgoingConnections[pId].addIceCandidate(candidate);
+    if(isSending(pId, treeId)) {
+      outgoingConnections[treeId][pId].addIceCandidate(candidate);
     }
-    if(isReceiving(pId)) {
-      incomingConnections[pId].addIceCandidate(candidate);
+    if(isReceiving(pId, treeId)) {
+      incomingConnections[treeId][pId].addIceCandidate(candidate);
     }
   } else if (message === 'bye') {
     handleRemoteHangup();
@@ -151,25 +202,27 @@ function handleWebRTC(pId, message) {
 
 ////////////////////////////////////////////////////
 
-function maybeStartSending(pId) {
-  console.log(`>>>>>>> maybeStart Sending pid = ${pId}`, isSending[pId], streams[socketId], isChannelReady);
-  if (!isSending(pId) && typeof streams[socketId] !== 'undefined') {
-    console.log(`>>>>>> creating outgoing peer connection 4 ${pId}`);
-    createOutputPeerConnection(pId);
-    startedOutputPeers[pId] = true;
+function maybeStartSending(pId, treeId) {
+  console.log(`>>>>>>> maybeStart Sending pid = ${pId}`, 
+    isSending(pId, treeId), streams[treeId], isChannelReady(pId))
+  
+  if (!isSending(pId, treeId) && typeof streams[treeId] !== 'undefined') {
+    console.log(`>>>>>> creating outgoing peer connection for < ${pId} > in tree #${treeId}`);
+    createOutputPeerConnection(pId, treeId);
+    startedSending(treeId, pId)
     if(!isInitiating) {
-      doCall(pId);
+      doCall(pId, treeId);
     }
   }
 }
 
-function maybeStartReceiving(pId) {
+function maybeStartReceiving(pId, treeId) {
   console.log(`>>>>>>> maybeStart Receiving () pid = ${pId}`, 
-    isReceiving(pId), streams[socketId], isChannelReady(socketId));
-  if (!isReceiving(pId) && isChannelReady(socketId)) {
-    console.log(`>>>>>> creating incoming peer connection for ${pId}`);
-    createInputPeerConnection(pId);
-    startedInputPeers[pId] = true;
+    isReceiving(pId, treeId), streams[treeId], isChannelReady(socketId));
+  if (!isReceiving(pId, treeId) && isChannelReady(socketId)) {
+    console.log(`>>>>>> creating incoming peer connection for ${pId} in tree #${treeId}`);
+    createInputPeerConnection(pId, treeId);
+    startedReceiving(treeId, pId)
   }
 }
 
@@ -186,15 +239,15 @@ function makeNewVideoElement(pId) {
 
 /////////////////////////////////////////////////////////
 
-function createOutputPeerConnection(pId) {
+function createOutputPeerConnection(pId, treeId) {
   try {
     var pc = new RTCPeerConnection(null);
-    pc.addStream(streams[socketId])
-    pc.onicecandidate = (event) => {handleIceCandidate(event, pId)};
+    pc.addStream(streams[treeId])
+    pc.onicecandidate = (event) => {handleIceCandidate(event, pId, treeId)};
     // pc.ontrack = handleRemoteTrackAdded
     // pc.onremovestream = handleRemoteStreamRemoved;
-    outgoingConnections[pId] = pc
-    console.log(`Created Output RTCPeerConnnection for ${pId}`);
+    addOutgoingConnection(treeId, pId, pc)
+    console.log(`Created Output RTCPeerConnnection for ${pId} in tree #${treeId}`);
   } catch (e) {
     console.log('Failed to create PeerConnection, exception: ' + e.message);
     alert('Cannot create RTCPeerConnection object.');
@@ -202,15 +255,15 @@ function createOutputPeerConnection(pId) {
   }
 }
 
-function createInputPeerConnection(pId) {
+function createInputPeerConnection(pId, treeId) {
   try {
     var pc = new RTCPeerConnection(null);
     pc.addStream(new MediaStream())
-    pc.onicecandidate = (event) => {handleIceCandidate(event, pId)};
-    pc.ontrack = (e) => handleRemoteTrackAdded(e, pId)
+    pc.onicecandidate = (event) => {handleIceCandidate(event, pId, treeId)};
+    pc.ontrack = (e) => handleRemoteTrackAdded(e, pId, treeId)
     pc.onremovestream = handleRemoteStreamRemoved;
-    incomingConnections[pId] = pc
-    console.log(`Created Input RTCPeerConnnection for ${pId}`);
+    addIncomingConnection(treeId, pId, pc)
+    console.log(`Created Input RTCPeerConnnection for ${pId} in tree #${treeId}`);
   } catch (e) {
     console.log('Failed to create PeerConnection, exception: ' + e.message);
     alert('Cannot create RTCPeerConnection object.');
@@ -218,39 +271,39 @@ function createInputPeerConnection(pId) {
   }
 }
 
-function doCall(pId) {
-  console.log('Sending offer to peer');
-  outgoingConnections[pId].createOffer(
-    (sd) => {setOutgoingLocalAndSendMessage(sd, pId)}, handleCreateOfferError);
+function doCall(pId, treeId) {
+  console.log(`'Sending offer to peer <${pId}> in tree #${treeId}`);
+  outgoingConnections[treeId][pId].createOffer(
+    (sd) => {setOutgoingLocalAndSendMessage(sd, pId, treeId)}, handleCreateOfferError);
 }
 
 function handleCreateOfferError(event) {
   console.log('createOffer() error: ', event);
 }
 
-function doAnswer(pId) {
-  console.log('Sending answer to peer.');
-  incomingConnections[pId].createAnswer().then(
-    (sd) => {setIncomingLocalAndSendMessage(sd, pId)},
+function doAnswer(pId, treeId) {
+  console.log(`'Sending answer to peer. <${pId}> in tree #${treeId}`);
+  incomingConnections[treeId][pId].createAnswer().then(
+    (sd) => {setIncomingLocalAndSendMessage(sd, pId, treeId)},
     onCreateSessionDescriptionError
   );
 }
 
-function setOutgoingLocalAndSendMessage(sessionDescription, pId) {
+function setOutgoingLocalAndSendMessage(sessionDescription, pId, treeId) {
   // Set Opus as the preferred codec in SDP if Opus is present.
   //  sessionDescription.sdp = preferOpus(sessionDescription.sdp);
-  outgoingConnections[pId].setLocalDescription(sessionDescription);
+  outgoingConnections[treeId][pId].setLocalDescription(sessionDescription);
   console.log('setOutgoingLocalAndSendMessage sending message', sessionDescription);
-  sendMessage(sessionDescription, pId);
+  sendMessage(sessionDescription, pId, treeId);
   isInitiating = false
 }
 
-function setIncomingLocalAndSendMessage(sessionDescription, pId) {
+function setIncomingLocalAndSendMessage(sessionDescription, pId, treeId) {
   // Set Opus as the preferred codec in SDP if Opus is present.
   //  sessionDescription.sdp = preferOpus(sessionDescription.sdp);
-  incomingConnections[pId].setLocalDescription(sessionDescription);
+  incomingConnections[treeId][pId].setLocalDescription(sessionDescription);
   console.log('setIncomingLocalAndSendMessage sending message', sessionDescription);
-  sendMessage(sessionDescription, pId);
+  sendMessage(sessionDescription, pId, treeId);
   isInitiating = false
 }
 
@@ -287,7 +340,7 @@ function requestTurn(turnURL) {
   }
 }
 
-function handleIceCandidate(event, pId) {
+function handleIceCandidate(event, pId, treeId) {
   console.log('icecandidate event: ', event);
   if (event.candidate) {
     sendMessage({
@@ -295,7 +348,7 @@ function handleIceCandidate(event, pId) {
       label: event.candidate.sdpMLineIndex,
       id: event.candidate.sdpMid,
       candidate: event.candidate.candidate
-    }, pId);
+    }, pId, treeId);
   } else {
     console.log('End of candidates.');
   }

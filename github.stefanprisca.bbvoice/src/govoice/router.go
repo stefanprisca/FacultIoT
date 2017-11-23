@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	st "goVoice/streamingTree"
+	st "github.com/goVoice/streamingTree"
 
 	"github.com/gorilla/websocket"
 )
@@ -44,6 +44,7 @@ func (sm StreamingMap) getStreamingTrees() []st.StreamingTree {
 
 type SocketMessage struct {
 	ID          string
+	TreeID      string
 	Message     interface{}
 	Destination string
 }
@@ -126,32 +127,31 @@ func onCreateOrJoin(x SocketMessage, streams *StreamingMap) {
 	streams.lock.Lock()
 	defer streams.lock.Unlock()
 	if len(streams.Streamers) >= 2 {
-		// TODO:
-		// 1) Join existing Streaming Trees
-		// 2) Create streaming tree
-		streams.Streamers[x.ID].Channel <- SocketMessage{x.ID, "join", ""}
+		streams.Streamers[x.ID].Channel <- SocketMessage{x.ID, "", "join", ""}
 
 		parents := addChild(x.ID, streams)
-		multicastMessage(x.ID, SocketMessage{x.ID, "newcommer", ""}, parents, *streams)
+		announceNewChild(x.ID, parents, *streams)
 
-		time.Sleep(time.Second)
+		// TODO: This is a synchronization issue. I might have to create more messages
+		// for a better control of the flow. Include more states in the WebRTC state machine.
+		time.Sleep(100 * time.Millisecond)
 		newStreamer := streams.Streamers[x.ID]
 		newStreamer.Tree = makeNewStreamingTree(x.ID, *streams)
-		announceNewTree(newStreamer.Tree, *streams)
+		announceNewTree(newStreamer.Tree, newStreamer.Tree.Root, *streams)
 	} else {
 		streamer := streams.Streamers[x.ID]
 		streamer.Tree = &st.StreamingTree{Root: x.ID}
-		streams.Streamers[x.ID].Channel <- SocketMessage{x.ID, "created", ""}
+		streams.Streamers[x.ID].Channel <- SocketMessage{x.ID, "", "created", ""}
 	}
 }
 
-func addChild(childId string, streams *StreamingMap) []string {
+func addChild(childId string, streams *StreamingMap) map[string]string {
 	keys := getMapKeysExcept(streams.Streamers, childId)
-	parents := []string{}
+	parents := make(map[string]string)
 	for _, k := range keys {
 		streamer := streams.Streamers[k]
 		parent := st.AddChild(streamer.Tree, childId)
-		parents = append(parents, parent)
+		parents[k] = parent
 	}
 
 	return parents
@@ -181,25 +181,22 @@ func routeMessage(x SocketMessage, streams StreamingMap) {
 	}
 }
 
-func multicastMessage(senderId string,
-	message interface{},
-	destinations []string,
+func announceNewChild(childId string,
+	parents map[string]string,
 	streams StreamingMap) {
-	for _, id := range destinations {
-		if id != senderId {
-			streams.Streamers[id].Channel <- message
-		}
+	for tID, pID := range parents {
+		streams.Streamers[pID].Channel <- SocketMessage{childId, tID, "newcommer", ""}
 	}
 }
 
-func announceNewTree(tree *st.StreamingTree, streams StreamingMap) {
+func announceNewTree(tree *st.StreamingTree, treeID string, streams StreamingMap) {
 	if tree == nil || tree.Children == nil {
 		return
 	}
 	rootStreamer := streams.Streamers[tree.Root]
 	for _, child := range tree.Children {
-		rootStreamer.Channel <- SocketMessage{child.Root, "newcommer", ""}
-		announceNewTree(child, streams)
+		rootStreamer.Channel <- SocketMessage{child.Root, treeID, "newcommer", ""}
+		announceNewTree(child, treeID, streams)
 	}
 }
 
