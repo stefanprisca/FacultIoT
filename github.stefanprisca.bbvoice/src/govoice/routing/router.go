@@ -18,6 +18,8 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
+const channelBufferSize = 100
+
 type Router struct {
 	streams   *StreamingMap
 	routerBox chan SocketMessage
@@ -57,7 +59,7 @@ func NewRouter() *Router {
 	streams := &StreamingMap{}
 	streams.lock = new(sync.Mutex)
 	streams.Streamers = make(map[string]*Streamer)
-	routerBox := make(chan SocketMessage)
+	routerBox := make(chan SocketMessage, channelBufferSize*5)
 	return &Router{streams, routerBox}
 }
 
@@ -77,7 +79,7 @@ func UpgradeToRouterSocket(router *Router, w http.ResponseWriter, r *http.Reques
 
 func makeNewStreamer(id string) Streamer {
 	log.Printf("making new streamer %v \n", id)
-	channel := make(chan (interface{}))
+	channel := make(chan (interface{}), channelBufferSize)
 	readyStreams := make(map[string]chan bool)
 	return Streamer{ID: id, Channel: channel, StreamLoaded: readyStreams}
 }
@@ -151,8 +153,8 @@ func initializeStreamLoadedChannels(newSID string, streams *StreamingMap) {
 	newStreamer := streams.Streamers[newSID]
 	for _, k := range keys {
 		streamer := streams.Streamers[k]
-		newStreamer.StreamLoaded[k] = make(chan bool)
-		streamer.StreamLoaded[newSID] = make(chan bool)
+		newStreamer.StreamLoaded[k] = make(chan bool, channelBufferSize)
+		streamer.StreamLoaded[newSID] = make(chan bool, channelBufferSize)
 	}
 }
 
@@ -196,6 +198,7 @@ func routeMessage(x SocketMessage, streams StreamingMap) {
 	if x.Destination == "" {
 		broadcastMessage(x.ID, x, streams)
 	} else {
+		log.Printf("Got message from %s to %s;", x.ID, x.Destination)
 		streams.Streamers[x.Destination].Channel <- x
 	}
 }
@@ -220,20 +223,14 @@ func announceNewTree(tree *StreamingTree, treeID string, streams StreamingMap) {
 	for _, child := range tree.Children {
 		rootStreamer.Channel <- SocketMessage{child.Root, treeID, "newcommer", ""}
 	}
-
 	for _, child := range tree.Children {
-		if child.Children == nil {
-			continue
-		}
-
 		var kid = child
-		//go func() {
-		log.Printf("Waiting for %s to load stream in tree %s", kid.Root, treeID)
-		<-streams.Streamers[kid.Root].StreamLoaded[treeID]
-
-		log.Printf("Wanting to announce kid tree for %s in tree %s", kid.Root, treeID)
-		announceNewTree(kid, treeID, streams)
-		//}()
+		go func() {
+			log.Printf("Waiting for %s to load stream in tree %s", kid.Root, treeID)
+			<-streams.Streamers[kid.Root].StreamLoaded[treeID]
+			log.Printf("Wanting to announce kid tree for %s in tree %s", kid.Root, treeID)
+			announceNewTree(kid, treeID, streams)
+		}()
 	}
 }
 

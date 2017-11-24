@@ -22,5 +22,5 @@ func main() {
 	http.HandleFunc("/printTrees", func(w http.ResponseWriter, r *http.Request) {
 		routing.PrintStreamingTrees(w, r, *router)
 	})
-	http.ListenAndServe(":8080", nil)
+	http.ListenAndServe(":8124", nil)
 }
