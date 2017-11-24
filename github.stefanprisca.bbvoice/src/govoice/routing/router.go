@@ -1,4 +1,4 @@
-package main
+package routing
 
 import (
 	"fmt"
@@ -6,8 +6,6 @@ import (
 	"net/http"
 	"sync"
 	"time"
-
-	st "goVoice/streamingTree"
 
 	"github.com/gorilla/websocket"
 )
@@ -20,11 +18,16 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
+type Router struct {
+	streams   *StreamingMap
+	routerBox chan SocketMessage
+}
+
 type Streamer struct {
-	ID              string
-	Channel         chan interface{}
-	ResponseChannel chan interface{}
-	Tree            *st.StreamingTree
+	ID           string
+	Channel      chan interface{}
+	StreamLoaded map[string]chan bool
+	Tree         *StreamingTree
 }
 
 type StreamingMap struct {
@@ -32,9 +35,9 @@ type StreamingMap struct {
 	lock      *sync.Mutex
 }
 
-func (sm StreamingMap) getStreamingTrees() []st.StreamingTree {
+func (sm StreamingMap) getStreamingTrees() []StreamingTree {
 	log.Printf("Getting trees %d", len(sm.Streamers))
-	result := []st.StreamingTree{}
+	result := []StreamingTree{}
 	for _, s := range sm.Streamers {
 		if s.Tree != nil {
 			result = append(result, *s.Tree)
@@ -50,49 +53,39 @@ type SocketMessage struct {
 	Destination string
 }
 
-func main() {
+func NewRouter() *Router {
 	streams := &StreamingMap{}
 	streams.lock = new(sync.Mutex)
 	streams.Streamers = make(map[string]*Streamer)
 	routerBox := make(chan SocketMessage)
-	upgradeHttpRequestsToSockets(streams, routerBox)
-
-	log.Println("Starting to serve websockets")
-	go serve(routerBox, streams)
-
-	http.HandleFunc("/printTrees", func(w http.ResponseWriter, r *http.Request) {
-		printStreamingTrees(w, r, *streams)
-	})
-	http.ListenAndServe(":8124", nil)
+	return &Router{streams, routerBox}
 }
 
-func upgradeHttpRequestsToSockets(streams *StreamingMap, routerBox chan SocketMessage) {
-	http.HandleFunc("/websocket", func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("Got a new request: %v \n", r.URL)
-		id := r.URL.Query().Get("id")
+func UpgradeToRouterSocket(router *Router, w http.ResponseWriter, r *http.Request) {
+	log.Printf("Got a new request: %v \n", r.URL)
+	id := r.URL.Query().Get("id")
 
-		route := makeNewStreamer(id)
-		streams.lock.Lock()
-		streams.Streamers[id] = &route
-		streams.lock.Unlock()
+	route := makeNewStreamer(id)
+	router.streams.lock.Lock()
+	router.streams.Streamers[id] = &route
+	router.streams.lock.Unlock()
 
-		con := Err1(upgrader.Upgrade(w, r, nil)).(*websocket.Conn)
-		go readMessages(con, routerBox)
-		go publishMessages(con, route.Channel)
-	})
+	con := Err1(upgrader.Upgrade(w, r, nil)).(*websocket.Conn)
+	go readMessages(con, router.routerBox)
+	go publishMessages(con, route.Channel)
 }
 
 func makeNewStreamer(id string) Streamer {
 	log.Printf("making new streamer %v \n", id)
 	channel := make(chan (interface{}))
-	respChannel := make(chan interface{}, 20)
-	return Streamer{ID: id, Channel: channel, ResponseChannel: respChannel}
+	readyStreams := make(map[string]chan bool)
+	return Streamer{ID: id, Channel: channel, StreamLoaded: readyStreams}
 }
 
 func readMessages(con *websocket.Conn, routerBox chan SocketMessage) {
-	readDelay := 5 * time.Millisecond
+	// readDelay := time.Millisecond
 	for {
-		time.Sleep(readDelay)
+		// time.Sleep(readDelay)
 
 		nextReq := &SocketMessage{}
 		Err0(con.ReadJSON(nextReq))
@@ -110,20 +103,20 @@ func publishMessages(conn *websocket.Conn, channel chan interface{}) {
 	}
 }
 
-func serve(routerBox chan SocketMessage, streams *StreamingMap) {
-	for x := range routerBox {
+func Serve(router *Router) {
+	for x := range router.routerBox {
 		// log.Printf("@serving %s: %s\n", x.ID, x.Message)
 
 		switch x.Message {
 		case "create or join":
-			go onCreateOrJoin(x, streams)
+			go onCreateOrJoin(x, router.streams)
 			break
 		case "got parent stream":
 			log.Printf("Got parent stream message from %s on tree %s", x.ID, x.TreeID)
-			streams.Streamers[x.ID].ResponseChannel <- x
+			router.streams.Streamers[x.ID].StreamLoaded[x.TreeID] <- true
 			break
 		default:
-			go routeMessage(x, *streams)
+			go routeMessage(x, *router.streams)
 			break
 		}
 	}
@@ -132,9 +125,11 @@ func serve(routerBox chan SocketMessage, streams *StreamingMap) {
 func onCreateOrJoin(x SocketMessage, streams *StreamingMap) {
 	streams.lock.Lock()
 	defer streams.lock.Unlock()
+
+	initializeStreamLoadedChannels(x.ID, streams)
+
 	if len(streams.Streamers) >= 2 {
 		streams.Streamers[x.ID].Channel <- SocketMessage{x.ID, "", "join", ""}
-
 		parents := addChild(x.ID, streams)
 		announceNewChild(x.ID, parents, *streams)
 
@@ -146,8 +141,18 @@ func onCreateOrJoin(x SocketMessage, streams *StreamingMap) {
 		announceNewTree(newStreamer.Tree, newStreamer.Tree.Root, *streams)
 	} else {
 		streamer := streams.Streamers[x.ID]
-		streamer.Tree = &st.StreamingTree{Root: x.ID}
+		streamer.Tree = &StreamingTree{Root: x.ID}
 		streams.Streamers[x.ID].Channel <- SocketMessage{x.ID, "", "created", ""}
+	}
+}
+
+func initializeStreamLoadedChannels(newSID string, streams *StreamingMap) {
+	keys := getMapKeysExcept(streams.Streamers, newSID)
+	newStreamer := streams.Streamers[newSID]
+	for _, k := range keys {
+		streamer := streams.Streamers[k]
+		newStreamer.StreamLoaded[k] = make(chan bool)
+		streamer.StreamLoaded[newSID] = make(chan bool)
 	}
 }
 
@@ -156,16 +161,24 @@ func addChild(childId string, streams *StreamingMap) map[string]string {
 	parents := make(map[string]string)
 	for _, k := range keys {
 		streamer := streams.Streamers[k]
-		parent := st.AddChild(streamer.Tree, childId)
+		parent := AddChild(streamer.Tree, childId)
 		parents[k] = parent
 	}
 
 	return parents
 }
 
-func makeNewStreamingTree(id string, streams StreamingMap) *st.StreamingTree {
+func makeNewStreamingTree(id string, streams StreamingMap) *StreamingTree {
 	existingTrees := streams.getStreamingTrees()
-	return st.NewStreamingTree(id, existingTrees)
+	return NewStreamingTree(id, existingTrees)
+}
+
+func getMapKeys(m map[string]*Streamer) []string {
+	keys := []string{}
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 func getMapKeysExcept(m map[string]*Streamer, id string) []string {
@@ -195,21 +208,32 @@ func announceNewChild(childId string,
 	}
 }
 
-func announceNewTree(tree *st.StreamingTree, treeID string, streams StreamingMap) {
+func announceNewTree(tree *StreamingTree, treeID string, streams StreamingMap) {
+
 	if tree == nil || tree.Children == nil {
 		return
 	}
+
+	log.Printf("Announcing new tree %s %v ", treeID, tree)
+
 	rootStreamer := streams.Streamers[tree.Root]
 	for _, child := range tree.Children {
 		rootStreamer.Channel <- SocketMessage{child.Root, treeID, "newcommer", ""}
 	}
 
 	for _, child := range tree.Children {
-		rsp := (<-streams.Streamers[child.Root].ResponseChannel).(SocketMessage)
-		log.Printf("Wanting to announce kid tree for %s in tree %s", child.Root, treeID)
-		if rsp.Message == "got parent stream" && rsp.TreeID == treeID {
-			announceNewTree(child, treeID, streams)
+		if child.Children == nil {
+			continue
 		}
+
+		var kid = child
+		//go func() {
+		log.Printf("Waiting for %s to load stream in tree %s", kid.Root, treeID)
+		<-streams.Streamers[kid.Root].StreamLoaded[treeID]
+
+		log.Printf("Wanting to announce kid tree for %s in tree %s", kid.Root, treeID)
+		announceNewTree(kid, treeID, streams)
+		//}()
 	}
 }
 
@@ -237,9 +261,10 @@ func Err2(arg interface{}, arg2 interface{}, err error) (interface{}, interface{
 	return arg, arg2
 }
 
-func printStreamingTrees(w http.ResponseWriter, r *http.Request, streams StreamingMap) {
+func PrintStreamingTrees(w http.ResponseWriter, r *http.Request, router Router) {
+	streams := *router.streams
 	for _, s := range streams.Streamers {
 		fmt.Fprintf(w, " \n --- printing tree %s ---- \n", s.ID)
-		st.PrettyPrintTree(*s.Tree, 0, w)
+		PrettyPrintTree(*s.Tree, 0, w)
 	}
 }
