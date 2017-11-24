@@ -23,6 +23,15 @@ function addOutgoingConnection(treeId, pId, pc){
   outgoingConnections[treeId] = tree
 }
 
+function removeOutgoingConnections(pId){
+  var treeIds = Object.keys(outgoingConnections)
+  treeIds.forEach(tId => {
+    if (outgoingConnections[tId] !== undefined) {
+      outgoingConnections[tId][pId] = undefined
+    }
+  })
+}
+
 var turnReady
 
 var readyChannels = {}
@@ -60,6 +69,16 @@ function startedSending(treeId, pId){
   }
   tree[pId] = true
   startedOutputPeers[treeId] = tree
+}
+
+function stopSending(pId){
+  var treeIds = Object.keys(startedOutputPeers)
+  treeIds.forEach(tId => {
+    if(startedOutputPeers[tId] !== undefined){
+      startedOutputPeers[tId][pId] = undefined
+    }
+  })
+  startedOutputPeers[pId] = undefined
 }
 
 
@@ -149,6 +168,10 @@ socket.onmessage = function (evnt){
       readyChannels[pId] = true;
       maybeStartReceiving(pId, treeId);
       break
+    
+    case 'bye':
+      handleRemoteHangup(pId)
+      break
   
     default:
       handleWebRTC(pId, treeId, message)
@@ -160,7 +183,7 @@ socket.onmessage = function (evnt){
 function handleWebRTC(pId, treeId, message) {
   if (message.type === 'offer') {
     if (isInitiating && !isReceiving(treeId)) {
-      makeNewVideoElement(pId)
+      makeNewVideoElement(treeId)
       maybeStartReceiving(pId, treeId);
     }
     incomingConnections[treeId]
@@ -343,7 +366,10 @@ function handleIceCandidate(event, pId, treeId) {
 function handleRemoteTrackAdded(event, treeId) {
   console.log(`Remote stream added! ${openVideoSpots}`)
   var stream = event.streams[0]
-  var remoteVideo = openVideoSpots.pop()
+  var remoteVideo = document.getElementById(treeId)
+  if (remoteVideo === undefined) {
+    remoteVideo = openVideoSpots.pop()
+  }
   remoteVideo.src = window.URL.createObjectURL(stream)
   streams[treeId] = stream
   sendMessage("got parent stream", "", treeId)
@@ -353,23 +379,17 @@ function handleRemoteStreamRemoved(event) {
   console.log('Remote stream removed. Event: ', event)
 }
 
-function hangup() {
-  console.log('Hanging up.');
-  stop();
-  sendMessage('bye');
-}
+function handleRemoteHangup(pId) {
+  console.log('Session terminated.')
+  removeOutgoingConnections(pId)
+  incomingConnections[pId] = undefined
+  streams[pId] = undefined
+  readyChannels[pId] = false
+  startedInputPeers[pId] = false
+  stopSending(pId)
 
-function handleRemoteHangup() {
-  console.log('Session terminated.');
-  stop();
-}
-
-function stop(pId) {
-  startedPeers[pId] = false;
-  // isAudioMuted = false;
-  // isVideoMuted = false;
-  pcs[pId].close();
-  pcs[pId] = null;
+  var videoElement = document.getElementById(pId)
+  remoteVideos.removeChild(videoElement)
 }
 
 ///////////////////////////////////////////

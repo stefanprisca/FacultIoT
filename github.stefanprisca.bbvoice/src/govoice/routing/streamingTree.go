@@ -7,20 +7,19 @@ import (
 
 const branchFactor = 2
 
-type StreamingTree struct {
+type streamingTree struct {
 	Root     string
-	Children []*StreamingTree
+	Children []*streamingTree
 }
 
-func AddChild(st *StreamingTree, childId string) string {
-	parent := FindFreeStreamer(st)
-	//log.Printf("Adding child with id <%s> in tree id <%s> under streamer <%s>", childId, st.Root, parent.Root)
-	parent.Children = append(parent.Children, &StreamingTree{Root: childId})
+func addChild(st *streamingTree, childID string) string {
+	parent := findFreeStreamer(st)
+	parent.Children = append(parent.Children, &streamingTree{Root: childID})
 	return parent.Root
 }
 
-func FindFreeStreamer(st *StreamingTree) *StreamingTree {
-	queue := []*StreamingTree{st}
+func findFreeStreamer(st *streamingTree) *streamingTree {
+	queue := []*streamingTree{st}
 
 	for {
 		if len(queue) == 0 {
@@ -29,7 +28,7 @@ func FindFreeStreamer(st *StreamingTree) *StreamingTree {
 		root := queue[0]
 		queue = queue[1:]
 		if root.Children == nil {
-			root.Children = []*StreamingTree{}
+			root.Children = []*streamingTree{}
 			return root
 		}
 
@@ -45,7 +44,27 @@ func FindFreeStreamer(st *StreamingTree) *StreamingTree {
 	return nil
 }
 
-func NewStreamingTree(id string, existingTrees []StreamingTree) *StreamingTree {
+func deleteChild(st *streamingTree, childID string) []*streamingTree {
+	if st.Children == nil {
+		return nil
+	}
+
+	newChildren := []*streamingTree{}
+	orphans := []*streamingTree{}
+	for _, c := range st.Children {
+		if c.Root == childID {
+			orphans = append(orphans, c.Children...)
+			continue
+		}
+		orphans = append(orphans, deleteChild(c, childID)...)
+		newChildren = append(newChildren, c)
+	}
+
+	st.Children = newChildren
+	return orphans
+}
+
+func newStreamingTree(id string, existingTrees []streamingTree) *streamingTree {
 	/*	TODO:
 		1-Optional) Find free streamers in other trees => these will be the prefered streamers in the new tree
 		2) Create new tree starting from the list of prefered streamers.
@@ -56,7 +75,7 @@ func NewStreamingTree(id string, existingTrees []StreamingTree) *StreamingTree {
 	return createTree(treeNodes)
 }
 
-func getTreeRoots(trees []StreamingTree) []string {
+func getTreeRoots(trees []streamingTree) []string {
 	result := []string{}
 	for _, t := range trees {
 		result = append(result, t.Root)
@@ -64,15 +83,15 @@ func getTreeRoots(trees []StreamingTree) []string {
 	return result
 }
 
-func createTree(treeNodes []string) *StreamingTree {
-	streamingTree := &StreamingTree{Root: treeNodes[0]}
+func createTree(treeNodes []string) *streamingTree {
+	streamingTree := &streamingTree{Root: treeNodes[0]}
 	for _, node := range treeNodes[1:] {
-		AddChild(streamingTree, node)
+		addChild(streamingTree, node)
 	}
 	return streamingTree
 }
 
-func PrettyPrintTree(tree StreamingTree, level int, out io.Writer) {
+func prettyPrintTree(tree streamingTree, level int, out io.Writer) {
 	increment := ""
 	for i := 0; i < level; i++ {
 		increment += "| "
@@ -84,6 +103,6 @@ func PrettyPrintTree(tree StreamingTree, level int, out io.Writer) {
 	}
 
 	for _, child := range tree.Children {
-		PrettyPrintTree(*child, level+1, out)
+		prettyPrintTree(*child, level+1, out)
 	}
 }

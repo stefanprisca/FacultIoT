@@ -20,7 +20,7 @@ func main() {
 	go routing.Serve(router)
 
 	http.HandleFunc("/printTrees", func(w http.ResponseWriter, r *http.Request) {
-		routing.PrintStreamingTrees(w, r, *router)
+		routing.PrintStreamingTrees(w, *router)
 	})
 	http.ListenAndServe(":8124", nil)
 }
