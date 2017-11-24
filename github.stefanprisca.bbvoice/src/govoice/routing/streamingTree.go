@@ -14,6 +14,7 @@ type StreamingTree struct {
 
 func AddChild(st *StreamingTree, childId string) string {
 	parent := FindFreeStreamer(st)
+	//log.Printf("Adding child with id <%s> in tree id <%s> under streamer <%s>", childId, st.Root, parent.Root)
 	parent.Children = append(parent.Children, &StreamingTree{Root: childId})
 	return parent.Root
 }

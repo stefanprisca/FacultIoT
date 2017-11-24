@@ -2,10 +2,8 @@ package routing
 
 import (
 	"fmt"
-	"log"
 	"net/http"
 	"sync"
-	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -37,11 +35,12 @@ type StreamingMap struct {
 	lock      *sync.Mutex
 }
 
-func (sm StreamingMap) getStreamingTrees() []StreamingTree {
-	log.Printf("Getting trees %d", len(sm.Streamers))
+func (sm StreamingMap) getStreamingTreesExcept(exceptID string) []StreamingTree {
+	////log.Printf("Getting trees %d", len(sm.Streamers))
 	result := []StreamingTree{}
 	for _, s := range sm.Streamers {
-		if s.Tree != nil {
+		if s.Tree != nil && s.ID != exceptID {
+			//log.Printf("Returning streaming tree %s", s.ID)
 			result = append(result, *s.Tree)
 		}
 	}
@@ -64,7 +63,7 @@ func NewRouter() *Router {
 }
 
 func UpgradeToRouterSocket(router *Router, w http.ResponseWriter, r *http.Request) {
-	log.Printf("Got a new request: %v \n", r.URL)
+	////log.Printf("Got a new request: %v \n", r.URL)
 	id := r.URL.Query().Get("id")
 
 	route := makeNewStreamer(id)
@@ -78,7 +77,7 @@ func UpgradeToRouterSocket(router *Router, w http.ResponseWriter, r *http.Reques
 }
 
 func makeNewStreamer(id string) Streamer {
-	log.Printf("making new streamer %v \n", id)
+	////log.Printf("making new streamer %v \n", id)
 	channel := make(chan (interface{}), channelBufferSize)
 	readyStreams := make(map[string]chan bool)
 	return Streamer{ID: id, Channel: channel, StreamLoaded: readyStreams}
@@ -92,7 +91,7 @@ func readMessages(con *websocket.Conn, routerBox chan SocketMessage) {
 		nextReq := &SocketMessage{}
 		Err0(con.ReadJSON(nextReq))
 		if nextReq.ID != "" {
-			// log.Printf("Received new frame on the websocket: %v \n", nextReq)
+			// //log.Printf("Received new frame on the websocket: %v \n", nextReq)
 			routerBox <- *nextReq
 		}
 	}
@@ -100,23 +99,29 @@ func readMessages(con *websocket.Conn, routerBox chan SocketMessage) {
 
 func publishMessages(conn *websocket.Conn, channel chan interface{}) {
 	for x := range channel {
-		// log.Printf("Sending a new event on the websock: %s\n", x)
+		// //log.Printf("Sending a new event on the websock: %s\n", x)
 		Err0(conn.WriteJSON(x))
 	}
 }
 
 func Serve(router *Router) {
 	for x := range router.routerBox {
-		// log.Printf("@serving %s: %s\n", x.ID, x.Message)
+		// //log.Printf("@serving %s: %s\n", x.ID, x.Message)
 
 		switch x.Message {
 		case "create or join":
 			go onCreateOrJoin(x, router.streams)
 			break
+
+		case "got user media":
+			go onGotUserMedia(x, router.streams)
+			break
+
 		case "got parent stream":
-			log.Printf("Got parent stream message from %s on tree %s", x.ID, x.TreeID)
+			//log.Printf("Got parent stream message from %s on tree %s", x.ID, x.TreeID)
 			router.streams.Streamers[x.ID].StreamLoaded[x.TreeID] <- true
 			break
+
 		default:
 			go routeMessage(x, *router.streams)
 			break
@@ -127,20 +132,13 @@ func Serve(router *Router) {
 func onCreateOrJoin(x SocketMessage, streams *StreamingMap) {
 	streams.lock.Lock()
 	defer streams.lock.Unlock()
-
 	initializeStreamLoadedChannels(x.ID, streams)
 
 	if len(streams.Streamers) >= 2 {
+		//log.Printf("Got a new streamer joining us! %s", x.ID)
 		streams.Streamers[x.ID].Channel <- SocketMessage{x.ID, "", "join", ""}
 		parents := addChild(x.ID, streams)
 		announceNewChild(x.ID, parents, *streams)
-
-		// TODO: This is a synchronization issue. I might have to create more messages
-		// for a better control of the flow. Include more states in the WebRTC state machine.
-		time.Sleep(100 * time.Millisecond)
-		newStreamer := streams.Streamers[x.ID]
-		newStreamer.Tree = makeNewStreamingTree(x.ID, *streams)
-		announceNewTree(newStreamer.Tree, newStreamer.Tree.Root, *streams)
 	} else {
 		streamer := streams.Streamers[x.ID]
 		streamer.Tree = &StreamingTree{Root: x.ID}
@@ -170,8 +168,19 @@ func addChild(childId string, streams *StreamingMap) map[string]string {
 	return parents
 }
 
+func onGotUserMedia(x SocketMessage, streams *StreamingMap) {
+	streams.lock.Lock()
+	defer streams.lock.Unlock()
+
+	routeMessage(x, *streams)
+
+	newStreamer := streams.Streamers[x.ID]
+	newStreamer.Tree = makeNewStreamingTree(x.ID, *streams)
+	announceNewTree(newStreamer.Tree, newStreamer.Tree.Root, *streams)
+}
+
 func makeNewStreamingTree(id string, streams StreamingMap) *StreamingTree {
-	existingTrees := streams.getStreamingTrees()
+	existingTrees := streams.getStreamingTreesExcept(id)
 	return NewStreamingTree(id, existingTrees)
 }
 
@@ -198,14 +207,13 @@ func routeMessage(x SocketMessage, streams StreamingMap) {
 	if x.Destination == "" {
 		broadcastMessage(x.ID, x, streams)
 	} else {
-		log.Printf("Got message from %s to %s;", x.ID, x.Destination)
+		////log.Printf("Got message from %s to %s;", x.ID, x.Destination)
 		streams.Streamers[x.Destination].Channel <- x
 	}
 }
 
 func announceNewChild(childId string,
-	parents map[string]string,
-	streams StreamingMap) {
+	parents map[string]string, streams StreamingMap) {
 	for tID, pID := range parents {
 		streams.Streamers[pID].Channel <- SocketMessage{childId, tID, "newcommer", ""}
 	}
@@ -217,7 +225,7 @@ func announceNewTree(tree *StreamingTree, treeID string, streams StreamingMap) {
 		return
 	}
 
-	log.Printf("Announcing new tree %s %v ", treeID, tree)
+	////log.Printf("Announcing new tree %s %v ", treeID, tree)
 
 	rootStreamer := streams.Streamers[tree.Root]
 	for _, child := range tree.Children {
@@ -226,9 +234,9 @@ func announceNewTree(tree *StreamingTree, treeID string, streams StreamingMap) {
 	for _, child := range tree.Children {
 		var kid = child
 		go func() {
-			log.Printf("Waiting for %s to load stream in tree %s", kid.Root, treeID)
+			////log.Printf("Waiting for %s to load stream in tree %s", kid.Root, treeID)
 			<-streams.Streamers[kid.Root].StreamLoaded[treeID]
-			log.Printf("Wanting to announce kid tree for %s in tree %s", kid.Root, treeID)
+			////log.Printf("Wanting to announce kid tree for %s in tree %s", kid.Root, treeID)
 			announceNewTree(kid, treeID, streams)
 		}()
 	}
@@ -244,7 +252,7 @@ func broadcastMessage(senderId string, message interface{}, streams StreamingMap
 
 func Err0(err error) {
 	if err != nil {
-		log.Fatal(err.Error())
+		////log.Fatal(err.Error())
 	}
 }
 
