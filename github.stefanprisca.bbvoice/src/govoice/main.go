@@ -4,9 +4,21 @@ import (
 	"govoice/routing"
 	"log"
 	"net/http"
+
+	"github.com/kabukky/httpscerts"
 )
 
 func main() {
+
+	// Check if the cert files are available.
+	err := httpscerts.Check("cert.pem", "key.pem")
+	// If they are not available, generate new ones.
+	if err != nil {
+		err = httpscerts.Generate("cert.pem", "key.pem", "127.0.0.1:8124")
+		if err != nil {
+			log.Fatal("Error: Couldn't create https certs.")
+		}
+	}
 
 	fs := http.FileServer(http.Dir("../web"))
 	http.Handle("/", fs)
@@ -22,5 +34,5 @@ func main() {
 	http.HandleFunc("/printTrees", func(w http.ResponseWriter, r *http.Request) {
 		routing.PrintStreamingTrees(w, *router)
 	})
-	http.ListenAndServe(":8124", nil)
+	http.ListenAndServeTLS(":8124", "cert.pem", "key.pem", nil)
 }

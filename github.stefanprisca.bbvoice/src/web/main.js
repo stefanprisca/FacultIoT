@@ -100,7 +100,7 @@ var room = 'foo';
 // Could prompt for room name:
 // room = prompt('Enter room name:');
 
-var socket = new WebSocket('ws://127.0.0.1:8124/websocket?id='+socketId)
+var socket = new WebSocket('wss://127.0.0.1:8124/websocket?id='+socketId)
 
 function sendMessage(message, destination = "", treeId = "") {
   console.log('Client sending message: ', message);
@@ -122,7 +122,7 @@ var openVideoSpots = []
 
 navigator.mediaDevices.getUserMedia({
   audio: true,
-  video: false
+  video: true
 })
 .then(gotStream)
 .catch(function(e) {
