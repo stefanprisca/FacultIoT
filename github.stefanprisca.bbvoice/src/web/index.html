@@ -5,21 +5,25 @@
 
   <title>Realtime communication with WebRTC</title>
   <h1 id="myName"></h1>
-  <link rel="stylesheet" href="/css/main.css" />
+  <link rel="stylesheet" href="./css/main.css" />
  
 </head>
 
 <body>
-
   <h1>Realtime communication with WebRTC</h1>
+  Name <input type="text" id="nickName"/>
+  <input type="submit"
+         name="Enter chat" id="frm1_submit" 
+         onclick="getNickname()"/>
+</form>
 
-  <video id="localVideo" controls autoplay muted loop></video>
-  <div id="remoteVideos">
-    <!-- <video id="remoteVideo" controls autoplay></video> -->
-  </div>
-  <script src="lib/adapter.js"></script>
-  <script src="main.js?32"></script>
-
+<script>
+  function getNickname() {
+      var nickname = document.getElementById("nickName").value
+      document.location.replace("./chatWindow.html?Nickname=" + nickname)
+  }
+  </script>
+  
 </body>
 
 </html>

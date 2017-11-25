@@ -3,8 +3,14 @@
 var isInitiating = true
 var streamLoaded = false
 
-const socketId = prompt("Enter user id:")
+const socketId = getSocketId() 
 document.getElementById("myName").innerText = socketId
+
+function getSocketId(){
+  var loc = document.location.href
+  var url = new URL(loc)
+  return url.searchParams.get('Nickname')
+}
 
 var incomingConnections = {}
 function addIncomingConnection(treeId, pc){
