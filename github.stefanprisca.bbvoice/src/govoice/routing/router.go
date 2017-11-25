@@ -70,7 +70,7 @@ func NewRouter() *Router {
 
 // UpgradeToRouterSocket upgrades the given request to a router communication socket
 func UpgradeToRouterSocket(router *Router, w http.ResponseWriter, r *http.Request) {
-	////log.Printf("Got a new request: %v \n", r.URL)
+	log.Printf("Got a new request: %v \n", r.URL)
 	id := r.URL.Query().Get("id")
 	if id == "" {
 		fmt.Fprint(w, "Cannot open a connection without a valid ID!")
