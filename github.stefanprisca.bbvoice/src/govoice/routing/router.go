@@ -6,7 +6,6 @@ import (
 	"log"
 	"net/http"
 	"sync"
-	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -95,10 +94,7 @@ func makeNewStreamer(id string) Streamer {
 }
 
 func readMessages(id string, con *websocket.Conn, routerBox chan SocketMessage) {
-	readDelay := 5 * time.Millisecond
 	for {
-		time.Sleep(readDelay)
-
 		nextReq := &SocketMessage{}
 		err := con.ReadJSON(nextReq)
 		if err != nil {
@@ -232,6 +228,7 @@ func getMapKeysExcept(m map[string]*Streamer, id string) []string {
 func announceNewChild(childID string,
 	parents map[string]string, streams StreamingMap) {
 	for tID, pID := range parents {
+		log.Printf("Sending newcommer message to %s", pID)
 		streams.Streamers[pID].Channel <- SocketMessage{childID, tID, "newcommer", ""}
 	}
 }
@@ -242,6 +239,7 @@ func announceNewTree(tree *streamingTree, treeID string, streams StreamingMap) {
 	}
 	rootStreamer := streams.Streamers[tree.Root]
 	for _, child := range tree.Children {
+		log.Printf("sending newcommer message to %s", rootStreamer.ID)
 		rootStreamer.Channel <- SocketMessage{child.Root, treeID, "newcommer", ""}
 	}
 	for _, child := range tree.Children {

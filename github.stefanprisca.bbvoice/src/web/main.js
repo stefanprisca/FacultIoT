@@ -122,7 +122,7 @@ var openVideoSpots = []
 
 navigator.mediaDevices.getUserMedia({
   audio: true,
-  video: false
+  video: true
 })
 .then(gotStream)
 .catch(function(e) {
@@ -148,9 +148,15 @@ socket.onmessage = function (evnt){
     case 'created':
       readyChannels[socketId] = true
       isInitiating = false
-      break
+	if (streams[socketId] !== undefined){
+	      sendMessage('got user media', "", socketId)
+	}	
+	break
     
     case 'join':
+	if (streams[socketId] !== undefined){
+		sendMessage('got user media', "", socketId)
+	}
       readyChannels[socketId] = true
       break;
       
@@ -160,7 +166,8 @@ socket.onmessage = function (evnt){
 
     case 'newcommer':
       // Someone new is comming. Maybe start sending them data
-      maybeStartSending(pId, treeId)
+      	readyChannels[pId] = true
+	maybeStartSending(pId, treeId)
       break;
     
     case 'got user media':
@@ -183,7 +190,7 @@ socket.onmessage = function (evnt){
 // This client receives a message
 function handleWebRTC(pId, treeId, message) {
   if (message.type === 'offer') {
-    if (isInitiating && !isReceiving(treeId)) {
+    if (!isReceiving(treeId)) {
       makeNewVideoElement(treeId)
       maybeStartReceiving(pId, treeId);
     }
@@ -220,9 +227,9 @@ function maybeStartSending(pId, treeId) {
     console.log(`>>>>>> creating outgoing peer connection for < ${pId} > in tree #${treeId}`);
     createOutputPeerConnection(pId, treeId);
     startedSending(treeId, pId)
-    if(!isInitiating) {
+    //if(!isInitiating) {
       doCall(pId, treeId);
-    }
+    //}
   }
 }
 
