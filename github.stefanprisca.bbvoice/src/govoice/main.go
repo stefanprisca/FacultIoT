@@ -14,7 +14,7 @@ func main() {
 	err := httpscerts.Check("cert.pem", "key.pem")
 	// If they are not available, generate new ones.
 	if err != nil {
-		err = httpscerts.Generate("cert.pem", "key.pem", "127.0.0.1:443")
+		err = httpscerts.Generate("cert.pem", "key.pem", "127.0.0.1:8080")
 		if err != nil {
 			log.Fatal("Error: Couldn't create https certs.")
 		}
@@ -34,5 +34,5 @@ func main() {
 	http.HandleFunc("/printTrees", func(w http.ResponseWriter, r *http.Request) {
 		routing.PrintStreamingTrees(w, *router)
 	})
-	http.ListenAndServeTLS(":443", "cert.pem", "key.pem", nil)
+	http.ListenAndServeTLS(":8080", "cert.pem", "key.pem", nil)
 }
