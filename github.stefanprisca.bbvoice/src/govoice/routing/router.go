@@ -77,6 +77,11 @@ func UpgradeToRouterSocket(router *Router, w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	if _, ok := router.streams.Streamers[id]; ok {
+		fmt.Fprint(w, "The provided ID is already taken!")
+		return
+	}
+
 	route := makeNewStreamer(id)
 	router.streams.lock.Lock()
 	router.streams.Streamers[id] = &route
