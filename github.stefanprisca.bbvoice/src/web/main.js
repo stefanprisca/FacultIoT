@@ -9,7 +9,17 @@ document.getElementById("myName").innerText = socketId
 function getSocketId(){
   var loc = document.location.href
   var url = new URL(loc)
-  return url.searchParams.get('Nickname')
+  return getParameterByName('Nickname', url)
+}
+
+function getParameterByName(name, url) {
+  if (!url) url = window.location.href;
+  name = name.replace(/[\[\]]/g, "\\$&");
+  var regex = new RegExp("[?&]" + name + "(=([^&#]*)|&|#|$)"),
+      results = regex.exec(url);
+  if (!results) return null;
+  if (!results[2]) return '';
+  return decodeURIComponent(results[2].replace(/\+/g, " "));
 }
 
 var incomingConnections = {}
