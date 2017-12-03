@@ -197,6 +197,7 @@ socket.onmessage = function (evnt){
     
     case 'bye':
       handleRemoteHangup(pId)
+      newEvent(pId, "Bye", 0)
       break
   
     default:

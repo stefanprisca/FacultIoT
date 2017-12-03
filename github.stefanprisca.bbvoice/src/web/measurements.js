@@ -27,7 +27,7 @@ Def: A node X starts receiving from another node Y when the stream of Y is added
 */
 
 var events = {}
-var streams = {}
+var reactions = {}
 
 function newEvent(treeId, description, networkSize){
   var timestamp = Date.now()
@@ -36,5 +36,48 @@ function newEvent(treeId, description, networkSize){
 
 function recordStreamReceived(treeId){
   var timestamp = Date.now()
-  streams[treeId] = timestamp 
+  reactions[treeId] = timestamp 
+}
+
+function getTimesToReceiveFromNewcommers(){
+  // Reactions with a GotUserMedia event in the events
+  var sum = 0
+  var number = 0
+  Object.keys(reactions).forEach(k =>{
+    if (events[k] === "GotUserMedia"){
+      sum += reactions[k] - events[k].time
+      number += 1
+    }
+  })
+  return sum/number
+}
+
+function getTimeToReceiveFromExisting(){
+  // Reactions without any GotUserMedia event
+  var sum = 0
+  var number = 0
+  Object.keys(reactions).forEach(k =>{
+    if (events[k] === undefined){
+      sum += reactions[k] - events[k].time
+      number += 1
+    }
+  })
+  return sum/number
+}
+
+function getTimeToReceiveAfterBye() {
+  // Reactions after the bye event
+  var sum = 0
+  var number = 0
+  Object.keys(events).forEach(k =>{
+    if (events[k].description === "Bye") {
+      Object.keys(reactions).foreach(r =>{
+        if (reactions[r] > events[k].time){
+          sum += reactions[k] - events[k].time
+          number += 1
+        }
+      })
+    }
+  })
+  return sum/number
 }
