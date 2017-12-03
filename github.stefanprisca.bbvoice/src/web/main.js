@@ -168,6 +168,7 @@ socket.onmessage = function (evnt){
     
     case 'join':
       readyChannels[socketId] = true
+      newEvent(socketId, "Joined", 0)
       break;
       
     case 'full':
@@ -177,6 +178,7 @@ socket.onmessage = function (evnt){
     case 'newcommer':
       // Someone new is comming. Maybe start sending them data
       maybeStartSending(pId, treeId)
+      newEvent(pId, "Newcommer", 0)
       break;
     
     case 'got user media':
@@ -389,6 +391,9 @@ function handleRemoteTrackAdded(event, treeId) {
   }
   remoteVideo.src = window.URL.createObjectURL(stream)
   streams[treeId] = stream
+
+  recordStreamReceived(treeId)
+
   sendMessage("got parent stream", "", treeId)
 }
 
