@@ -116,7 +116,7 @@ var room = 'foo';
 // Could prompt for room name:
 // room = prompt('Enter room name:');
 
-var socket = new WebSocket('wss://52.28.20.194:443/websocket?id='+socketId)
+var socket = new WebSocket('wss://127.0.0.1:8124/websocket?id='+socketId)
 
 function sendMessage(message, destination = "", treeId = "") {
   console.log('Client sending message: ', message);
